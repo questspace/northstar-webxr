@@ -1,0 +1,49 @@
+# Build outputs
+build/
+*/build/
+*.dylib
+*.so
+*.a
+*.o
+
+# Ultraleap WebSocket server (cloned repo)
+ultraleap-websocket/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Unity
+Library/
+Temp/
+Obj/
+Logs/
+UserSettings/
+*.csproj
+*.sln
+*.pidb
+*.unityproj
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+._*
+
+# Logs & Debug
+*.log
+*.pid
+
+# misc
+project-esky-unity/

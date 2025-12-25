@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XR50 Visual Test</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="hud">
+        <div class="header">
+            <span id="status" class="disconnected"></span>
+            <h1>XVisio XR50</h1>
+        </div>
+        <div class="stat"><span>Position</span><span id="position">X: 0.00 Y: 0.00 Z: 0.00</span></div>
+        <div class="stat"><span>Rotation</span><span id="rotation">R: 0.00° P: 0.00° Y: 0.00°</span></div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

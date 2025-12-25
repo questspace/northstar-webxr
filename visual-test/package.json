@@ -1,0 +1,11 @@
+{
+  "name": "xr50-visual-test",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
+
