@@ -70,8 +70,12 @@ Device::Device(libusb_device* libusbDevice, libusb_context* context)
 }
 
 Device::~Device() {
-    libusb_release_interface(handle, 3);
-    libusb_close(handle);
+    // Safe cleanup — device may already be disconnected
+    if (handle) {
+        libusb_release_interface(handle, 3); // Ignoring errors is fine here
+        libusb_close(handle);
+        handle = nullptr;
+    }
 }
 
 std::string& Device::getUUID() { return uuid; }

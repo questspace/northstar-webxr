@@ -42,6 +42,7 @@ namespace xv {
         void start(mode mode);
 
         bool running() const;
+        int getFrameCount() const;
 
         void stop();
 
@@ -57,6 +58,7 @@ namespace xv {
         libusb_device_handle* handle;
         std::thread slamThread;
         std::atomic_bool runThread;
+        std::atomic<int> frameCount{0};
         libusb_context* context;
     };
 } // xv

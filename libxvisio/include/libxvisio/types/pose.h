@@ -15,13 +15,22 @@ using Vector3 = std::array<double, 3>;
 using Vector4 = std::array<double, 4>;
 
 struct Pose {
+    /// Construct from rotation matrix (derives quaternion)
     Pose(const Vector3& pos, const Matrix3& rot, int64_t ts)
         : position(pos)
         , matrix(rot)
         , quaternion(matrixToQuaternion(rot))
         , timestamp(ts) {}
 
+    /// Construct from quaternion directly (derives rotation matrix)
+    Pose(const Vector3& pos, const Vector4& quat, int64_t ts)
+        : position(pos)
+        , matrix(quaternionToMatrix(quat))
+        , quaternion(quat)
+        , timestamp(ts) {}
+
     static Vector4 matrixToQuaternion(const Matrix3& matrix);
+    static Matrix3 quaternionToMatrix(const Vector4& q);
 
     Vector3 position;    ///< Position in meters (X, Y, Z)
     Matrix3 matrix;      ///< Rotation matrix

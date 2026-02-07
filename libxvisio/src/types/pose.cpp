@@ -6,6 +6,15 @@
 #include <cmath>
 
 namespace xv {
+    Matrix3 Pose::quaternionToMatrix(const Vector4& q) {
+        double w = q[0], x = q[1], y = q[2], z = q[3];
+        return {{
+            {1.0 - 2.0*(y*y + z*z), 2.0*(x*y - w*z),       2.0*(x*z + w*y)},
+            {2.0*(x*y + w*z),       1.0 - 2.0*(x*x + z*z), 2.0*(y*z - w*x)},
+            {2.0*(x*z - w*y),       2.0*(y*z + w*x),       1.0 - 2.0*(x*x + y*y)}
+        }};
+    }
+
     Vector4 Pose::matrixToQuaternion(const Matrix3&matrix) {
         Vector4 quaternion;
 

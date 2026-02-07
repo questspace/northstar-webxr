@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <memory>
+#include <mutex>
 #include <libusb.h>
 #include "device.h"
 #include "slam.h"
@@ -22,12 +23,21 @@ namespace xv {
 
         const std::vector<std::shared_ptr<Device>>& getDevices();
 
+        /// Process devices discovered via hotplug. Call from main thread periodically.
+        void pollNewDevices();
+
     private:
         libusb_context* usb_ctx = nullptr;
         std::vector<std::shared_ptr<Device>> devices;
-        LIBUSB_CALL static int
-        hotPlugCallback(libusb_context*, libusb_device* device, libusb_hotplug_event,
-                        std::vector<std::shared_ptr<Device>>* devices);
+
+        // Hotplug queues raw device pointers; Device construction happens outside the callback
+        std::mutex pendingMutex;
+        std::vector<libusb_device*> pendingDevices;
+        libusb_hotplug_callback_handle hotplugHandle = 0;
+
+        static int LIBUSB_CALL
+        hotPlugCallback(libusb_context* ctx, libusb_device* device,
+                        libusb_hotplug_event event, void* user_data);
     };
 } // xv
 
