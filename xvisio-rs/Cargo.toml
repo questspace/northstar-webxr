@@ -1,0 +1,25 @@
+[package]
+name = "xvisio"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform Rust SDK for XVisio XR50 6DOF tracking sensor"
+license = "MIT"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+hidapi = "2.6"
+rusb = "0.9"
+thiserror = "2"
+crossbeam-channel = "0.5"
+log = "0.4"
+bitflags = "2"
+
+[build-dependencies]
+cbindgen = "0.27"
+
+[dev-dependencies]
+env_logger = "0.11"
+tungstenite = "0.24"
+tiny_http = "0.12"
