@@ -6,6 +6,11 @@ build/
 *.a
 *.o
 
+# Rust / Cargo
+target/
+**/target/
+Cargo.lock
+
 # Ultraleap WebSocket server (cloned repo)
 ultraleap-websocket/
 

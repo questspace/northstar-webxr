@@ -22,7 +22,12 @@ import { fileURLToPath } from 'url'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 const PORT = parseInt(process.env.PORT ?? '8080', 10)
-const XVISIO_BIN = resolve(__dirname, '../libxvisio/build/xvisio_test')
+const XVISIO_BIN = resolve(
+  __dirname,
+  process.platform === 'win32'
+    ? '../xvisio-rs/target/release/examples/stream_json.exe'
+    : '../xvisio-rs/target/release/examples/stream_json'
+)
 const DIST_DIR = resolve(__dirname, 'dist')
 const AUTO_SPAWN = process.env.NO_SPAWN !== '1' && existsSync(XVISIO_BIN)
 
