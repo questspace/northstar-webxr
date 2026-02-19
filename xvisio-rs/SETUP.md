@@ -1,7 +1,9 @@
 # xvisio-rs — Cross-Platform Rust SDK for XVisio XR50
 
-Cross-platform Rust SDK for the XVisio XR50 6DOF tracking sensor using **hidapi**.
-Works with the OS default HID driver — no WinUSB/libusb driver installation needed.
+Cross-platform Rust SDK for the XVisio XR50 6DOF tracking sensor.
+
+- **Windows/Linux**: production runtime, uses hidapi for commands + SLAM streaming
+- **macOS**: experimental diagnostics only, supports `hidapi` and `rusb` backends but does not produce usable tracking
 
 Includes an all-in-one Rust server that replaces Node.js `server.js` for the visual-test frontend.
 
@@ -9,7 +11,7 @@ Includes an all-in-one Rust server that replaces Node.js `server.js` for the vis
 
 ```
 XR50 sensor (USB HID)
-    | hidapi (950 Hz raw SLAM)
+    | hidapi (Windows/Linux, macOS experimental) or rusb/libusb (macOS experimental)
 xvisio-rs Rust library
     | crossbeam-channel
 server.rs example binary
@@ -23,13 +25,13 @@ Browser (React + Three.js) at http://localhost:8080
 
 ```
 xvisio-rs/
-  Cargo.toml          # hidapi, thiserror, crossbeam-channel, log, bitflags
+  Cargo.toml          # hidapi, rusb, thiserror, crossbeam-channel, log, bitflags
   build.rs            # cbindgen -> include/xvisio.h (C header for FFI)
   src/
     lib.rs            # Public API: Device, SlamStream, SlamSample, Pose, etc.
     device.rs         # Device enumeration + open via hidapi (VID=0x040E, PID=0xF408)
     hid.rs            # HID transport: write/get_input_report for commands
-    slam.rs           # SLAM reader thread: hidapi read_timeout loop -> channel
+    slam.rs           # SLAM reader thread: hidapi/rusb backend -> channel
     protocol.rs       # USB protocol: build_command, parse_slam_packet, quaternion_to_euler
     types.rs          # Pose, SlamSample, Features, SlamMode
     error.rs          # XvisioError enum
@@ -94,16 +96,52 @@ Then verify in WSL2: `lsusb | grep 040e`
 - "Port Reset Failed" errors: unplug XR50 for 10+ seconds, replug to a different USB port
 - After `usbipd attach`, always run `sudo rmmod uvcvideo` before using the XR50
 
-### macOS (Apple Silicon / M1)
+### macOS (Apple Silicon / M1/M2/M3)
 
-No extra packages needed — hidapi links against the system IOHIDManager framework.
+No extra packages needed — hidapi links against IOKit, and rusb uses libusb.
 
 ```bash
 # Rust should default to aarch64-apple-darwin on M1
 rustup show  # verify target
 ```
 
-If the app gets blocked accessing HID, check System Settings > Privacy & Security > Input Monitoring.
+macOS runtime status: **not production-ready** for XR50 SLAM.
+
+Device discovery and info queries (enumerate, info) work without sudo.
+
+```bash
+# No sudo needed
+cargo run --release --example enumerate
+cargo run --release --example info
+
+# Experimental run (hidapi, no sudo)
+XVISIO_MAC_BACKEND=hidapi cargo run --release --example stream
+
+# Experimental run (rusb, usually needs sudo)
+XVISIO_MAC_BACKEND=rusb sudo cargo run --release --example stream
+```
+
+Or use the helper script:
+
+```bash
+# Recommended on macOS when testing alongside Ultraleap
+XVISIO_MAC_BACKEND=hidapi \
+XVISIO_UVC_MODE=1 \
+XVISIO_ROTATION_ENABLED=1 \
+XVISIO_ENABLE_STEREO_INIT=1 \
+XVISIO_REOPEN_AFTER_CONFIG=0 \
+./run-macos.sh stream
+```
+
+Known behavior on macOS during tests:
+- SLAM packets arrive at ~880-970 Hz
+- confidence stays around `0.001`
+- translation remains `[0,0,0]`
+- rotation often freezes or is unstable depending on parse mode/backends
+
+Conclusion: keep macOS as diagnostics/dev host only; run XR50 runtime on Linux/Windows.
+
+For future macOS retries, keep `examples/macos_diag.rs` and `run-macos.sh`.
 
 ### Windows
 
@@ -123,7 +161,8 @@ cd ..
 
 # 2. Build and run the server
 cd xvisio-rs
-cargo run --release --example server
+cargo run --release --example server       # Windows/Linux
+# macOS: experimental only, not recommended for runtime
 
 # 3. Open browser to http://localhost:8080
 ```
@@ -175,6 +214,20 @@ cargo run --example stream_json    # JSON lines to stdout at ~950 Hz
 
 **Note:** Without `sudo rmmod uvcvideo`, SLAM outputs identity pose with zero confidence.
 See the Linux prerequisites section above for the fix.
+
+### macOS (Apple Silicon M1 Max)
+
+| Example | Result |
+|---------|--------|
+| enumerate | Lists XR50: UUID, version, features (no sudo) |
+| info | UUID, version, features (no sudo) |
+| stream (rusb) | Frequently disconnects/re-enumerates (`No such device`, pipe errors) |
+| stream (hidapi) | Stable packet stream (~890 Hz) but non-functional pose (`conf ~0.001`, `pos=[0,0,0]`) |
+| server | Not suitable for runtime due to non-functional tracking |
+
+`hidapi` backend is preferred for macOS diagnostics because it avoids aggressive
+detach/claim behavior that can disrupt other USB devices (for example Ultraleap on
+the same hub). Keep `rusb` path for low-level troubleshooting only.
 
 ## Key Technical Details
 

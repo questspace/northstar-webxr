@@ -205,7 +205,7 @@ pub unsafe extern "C" fn xv_start_slam(dev: *mut XvDevice, mode: c_int) -> *mut 
     if dev.is_null() {
         return std::ptr::null_mut();
     }
-    let dev = &*dev;
+    let dev = &mut *dev;
     let slam_mode = match mode {
         0 => SlamMode::Edge,
         1 => SlamMode::Mixed,
@@ -311,10 +311,7 @@ pub extern "C" fn xv_last_error() -> *const c_char {
 }
 
 fn c_char_to_string(buf: &[c_char]) -> String {
-    let end = buf
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(buf.len());
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     let bytes: Vec<u8> = buf[..end].iter().map(|&c| c as u8).collect();
     String::from_utf8_lossy(&bytes).to_string()
 }
