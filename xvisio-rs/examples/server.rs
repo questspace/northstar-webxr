@@ -139,7 +139,10 @@ fn handle_websocket(
         }
     }
 
-    eprintln!("[WS] Client disconnected ({} total)", clients.lock().unwrap().len());
+    eprintln!(
+        "[WS] Client disconnected ({} total)",
+        clients.lock().unwrap().len()
+    );
 }
 
 /// Serve static files from dist/ over HTTP.
@@ -170,8 +173,7 @@ fn handle_http(mut stream: TcpStream, request_str: &str, dist_dir: &Path) {
             match std::fs::read(&fallback) {
                 Ok(b) => (b, fallback),
                 Err(_) => {
-                    let resp =
-                        "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nNot found";
+                    let resp = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nNot found";
                     let _ = stream.write_all(resp.as_bytes());
                     let _ = stream.flush();
                     return;

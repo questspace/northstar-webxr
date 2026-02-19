@@ -69,9 +69,7 @@ impl SlamStream {
 
     /// Receive the next SLAM sample (blocks until available).
     pub fn recv(&self) -> Result<SlamSample> {
-        self.receiver
-            .recv()
-            .map_err(|_| XvisioError::StreamStopped)
+        self.receiver.recv().map_err(|_| XvisioError::StreamStopped)
     }
 
     /// Try to receive a SLAM sample without blocking.
@@ -119,6 +117,16 @@ fn slam_reader_hidapi(
 ) {
     let epoch = Instant::now();
     let mut buf = [0u8; 64];
+    let debug_raw = std::env::var("XVISIO_DEBUG_RAW")
+        .ok()
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false);
+    let mut debug_packets: u32 = 0;
 
     log::info!("SLAM reader started (hidapi)");
 
@@ -140,9 +148,38 @@ fn slam_reader_hidapi(
         let data: &[u8] = if len >= protocol::REPORT_SIZE && buf[0] == protocol::SLAM_HEADER[0] {
             &buf[..len]
         } else {
+            if debug_raw && debug_packets < 20 {
+                debug_packets += 1;
+                let b0 = if len > 0 { buf[0] } else { 0 };
+                let b1 = if len > 1 { buf[1] } else { 0 };
+                let b2 = if len > 2 { buf[2] } else { 0 };
+                log::info!(
+                    "SLAM raw[{}]: len={} unexpected hdr={:02x} {:02x} {:02x}",
+                    debug_packets,
+                    len,
+                    b0,
+                    b1,
+                    b2
+                );
+            }
             continue;
         };
 
+        if debug_raw && debug_packets < 20 {
+            debug_packets += 1;
+            log::info!(
+                "SLAM raw[{}]: len={} hdr={:02x} {:02x} {:02x} ts={:02x}{:02x}{:02x}{:02x}",
+                debug_packets,
+                len,
+                data[0],
+                data[1],
+                data[2],
+                data[6],
+                data[5],
+                data[4],
+                data[3]
+            );
+        }
         dispatch_sample(data, epoch, &sender, &stop_flag);
     }
 }
@@ -157,6 +194,16 @@ fn slam_reader_rusb(
     let mut buf = [0u8; 64];
     let timeout = Duration::from_millis(200);
     let mut consecutive_errors: u32 = 0;
+    let debug_raw = std::env::var("XVISIO_DEBUG_RAW")
+        .ok()
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false);
+    let mut debug_packets: u32 = 0;
 
     log::info!("SLAM reader started (rusb)");
 
@@ -177,12 +224,27 @@ fn slam_reader_rusb(
                 stop_flag.store(true, Ordering::Relaxed);
                 break;
             }
+            Err(rusb::Error::Pipe) | Err(rusb::Error::Io) => {
+                consecutive_errors += 1;
+                if consecutive_errors <= 5 || consecutive_errors % 50 == 0 {
+                    log::warn!("SLAM interrupt read recovery ({})", consecutive_errors);
+                }
+                handle.clear_halt(protocol::SLAM_ENDPOINT).ok();
+                std::thread::sleep(Duration::from_millis(10));
+                if consecutive_errors > 1000 {
+                    log::error!("SLAM reader: too many recoverable errors, stopping");
+                    stop_flag.store(true, Ordering::Relaxed);
+                    break;
+                }
+                continue;
+            }
             Err(e) => {
                 consecutive_errors += 1;
-                if consecutive_errors <= 5 {
+                if consecutive_errors <= 5 || consecutive_errors % 50 == 0 {
                     log::warn!("SLAM interrupt read error: {}", e);
                 }
-                if consecutive_errors > 100 {
+                std::thread::sleep(Duration::from_millis(10));
+                if consecutive_errors > 1000 {
                     log::error!("SLAM reader: too many consecutive errors, stopping");
                     stop_flag.store(true, Ordering::Relaxed);
                     break;
@@ -199,10 +261,45 @@ fn slam_reader_rusb(
             let total = (len + 1).min(64);
             buf.copy_within(0..len, 1);
             buf[0] = protocol::SLAM_HEADER[0]; // 0x01
+            if debug_raw && debug_packets < 20 {
+                debug_packets += 1;
+                log::info!(
+                    "SLAM raw[{}]: len={} hdr={:02x} {:02x} {:02x}",
+                    debug_packets,
+                    total,
+                    buf[0],
+                    buf[1],
+                    buf[2]
+                );
+            }
             dispatch_sample(&buf[..total], epoch, &sender, &stop_flag);
         } else if len >= protocol::REPORT_SIZE && buf[0] == protocol::SLAM_HEADER[0] {
             // Report ID is included (some libusb configurations)
+            if debug_raw && debug_packets < 20 {
+                debug_packets += 1;
+                log::info!(
+                    "SLAM raw[{}]: len={} hdr={:02x} {:02x} {:02x}",
+                    debug_packets,
+                    len,
+                    buf[0],
+                    buf[1],
+                    buf[2]
+                );
+            }
             dispatch_sample(&buf[..len], epoch, &sender, &stop_flag);
+        } else if debug_raw && debug_packets < 20 {
+            debug_packets += 1;
+            let b0 = if len > 0 { buf[0] } else { 0 };
+            let b1 = if len > 1 { buf[1] } else { 0 };
+            let b2 = if len > 2 { buf[2] } else { 0 };
+            log::info!(
+                "SLAM raw[{}]: len={} unexpected hdr={:02x} {:02x} {:02x}",
+                debug_packets,
+                len,
+                b0,
+                b1,
+                b2
+            );
         }
     }
 

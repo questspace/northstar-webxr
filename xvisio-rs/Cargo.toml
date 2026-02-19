@@ -9,7 +9,7 @@ license = "MIT"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-hidapi = "2.6"
+hidapi = { version = "2.6", features = ["macos-shared-device"] }
 rusb = "0.9"
 thiserror = "2"
 crossbeam-channel = "0.5"

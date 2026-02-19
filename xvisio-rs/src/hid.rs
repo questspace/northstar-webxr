@@ -82,9 +82,9 @@ impl HidTransport {
         Ok(protocol::parse_features(&response[offset..]))
     }
 
-    /// Send the configure command for the given SLAM mode.
-    pub fn configure(&self, edge: bool, embedded_algo: bool) -> Result<()> {
-        let cmd_buf = protocol::build_configure_cmd(edge, embedded_algo);
+    /// Send the configure command for the given SLAM mode and UVC mode.
+    pub fn configure_with_uvc(&self, edge: bool, uvc_mode: u8, embedded_algo: bool) -> Result<()> {
+        let cmd_buf = protocol::build_configure_cmd_with_uvc(edge, uvc_mode, embedded_algo);
 
         self.device
             .write(&cmd_buf)
@@ -100,9 +100,20 @@ impl HidTransport {
         Ok(())
     }
 
-    /// Send the start/stop edge stream command.
-    pub fn edge_stream(&self, start: bool) -> Result<()> {
-        let cmd_buf = protocol::build_edge_stream_cmd(start);
+    /// Send the configure command for the given SLAM mode.
+    pub fn configure(&self, edge: bool, embedded_algo: bool) -> Result<()> {
+        self.configure_with_uvc(edge, 0, embedded_algo)
+    }
+
+    /// Send the edge stream command with explicit parameters.
+    pub fn edge_stream_with_params(
+        &self,
+        edge_mode: u8,
+        rotation_enabled: bool,
+        flipped: bool,
+    ) -> Result<()> {
+        let cmd_buf =
+            protocol::build_edge_stream_cmd_with_params(edge_mode, rotation_enabled, flipped);
 
         self.device
             .write(&cmd_buf)
@@ -114,6 +125,23 @@ impl HidTransport {
         recv_buf[0] = PREFIX_DEVICE_TO_HOST;
         let _ = self.device.get_input_report(&mut recv_buf);
 
+        Ok(())
+    }
+
+    /// Send the start/stop edge stream command.
+    pub fn edge_stream(&self, start: bool) -> Result<()> {
+        self.edge_stream_with_params(if start { 1 } else { 0 }, start, false)
+    }
+
+    /// Send stereo camera init command.
+    pub fn stereo_camera_init(&self) -> Result<()> {
+        let _ = self.transaction(protocol::CMD_STEREO_CAMERA_INIT)?;
+        Ok(())
+    }
+
+    /// Send stereo camera start command.
+    pub fn stereo_camera_start(&self) -> Result<()> {
+        let _ = self.transaction(protocol::CMD_STEREO_CAMERA_START)?;
         Ok(())
     }
 }

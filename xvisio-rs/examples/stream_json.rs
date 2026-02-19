@@ -37,10 +37,12 @@ fn main() {
 
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
+    let mut idle_timeouts: u32 = 0;
 
     loop {
         match stream.recv_timeout(Duration::from_secs(2)) {
             Ok(sample) => {
+                idle_timeouts = 0;
                 let p = &sample.pose;
                 let _ = writeln!(
                     out,
@@ -56,8 +58,12 @@ fn main() {
                 let _ = out.flush();
             }
             Err(xvisio::XvisioError::Timeout) => {
-                eprintln!("Timeout waiting for SLAM data");
-                break;
+                idle_timeouts += 1;
+                eprintln!("No SLAM packet for 2s (timeout #{})", idle_timeouts);
+                if idle_timeouts >= 15 {
+                    eprintln!("Stopping after 30s without SLAM packets");
+                    break;
+                }
             }
             Err(e) => {
                 eprintln!("Error: {}", e);

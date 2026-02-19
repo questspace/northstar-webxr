@@ -1,4 +1,5 @@
 use crate::types::{Features, ImuData, Pose, SlamSample};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 // -- USB identifiers --
@@ -42,25 +43,45 @@ pub fn build_command(cmd: &[u8]) -> [u8; REPORT_SIZE] {
 /// Build the configure command for a given SLAM mode.
 /// Edge mode: [0x19, 0x95, 0x01, 0x01, 0x00]
 /// Mixed mode: [0x19, 0x95, 0x01, 0x01, 0x01]
-pub fn build_configure_cmd(edge: bool, embedded_algo: bool) -> [u8; REPORT_SIZE] {
+pub fn build_configure_cmd_with_uvc(
+    edge: bool,
+    uvc_mode: u8,
+    embedded_algo: bool,
+) -> [u8; REPORT_SIZE] {
     let mut cmd_bytes = [0u8; 5];
     cmd_bytes[0..2].copy_from_slice(CMD_CONFIGURE);
     cmd_bytes[2] = if edge { 1 } else { 0 };
-    cmd_bytes[3] = 0; // uvcMode=0 (per official XSlamDriver)
+    cmd_bytes[3] = uvc_mode;
     cmd_bytes[4] = if embedded_algo { 1 } else { 0 };
     build_command(&cmd_bytes)
+}
+
+/// Build the configure command with the default UVC mode.
+///
+/// Default is `uvcMode=0` to preserve existing Windows/Linux behavior.
+pub fn build_configure_cmd(edge: bool, embedded_algo: bool) -> [u8; REPORT_SIZE] {
+    build_configure_cmd_with_uvc(edge, 0, embedded_algo)
 }
 
 /// Build the start/stop edge stream command.
 /// Start: [0xA2, 0x33, 0x01, 0x01, 0x00] (rotationEnabled=true per C++ libxvisio)
 /// Stop:  [0xA2, 0x33, 0x00, 0x00, 0x00]
-pub fn build_edge_stream_cmd(start: bool) -> [u8; REPORT_SIZE] {
+pub fn build_edge_stream_cmd_with_params(
+    edge_mode: u8,
+    rotation_enabled: bool,
+    flipped: bool,
+) -> [u8; REPORT_SIZE] {
     let mut cmd_bytes = [0u8; 5];
     cmd_bytes[0..2].copy_from_slice(CMD_EDGE_STREAM);
-    cmd_bytes[2] = if start { 1 } else { 0 };
-    cmd_bytes[3] = if start { 1 } else { 0 }; // rotationEnabled=true (matches C++ libxvisio)
-    // flipped=0
+    cmd_bytes[2] = edge_mode;
+    cmd_bytes[3] = if rotation_enabled { 1 } else { 0 };
+    cmd_bytes[4] = if flipped { 1 } else { 0 };
     build_command(&cmd_bytes)
+}
+
+/// Build the start/stop edge stream command with default parameters.
+pub fn build_edge_stream_cmd(start: bool) -> [u8; REPORT_SIZE] {
+    build_edge_stream_cmd_with_params(if start { 1 } else { 0 }, start, false)
 }
 
 /// Build the stereo camera init command for macOS.
@@ -130,10 +151,108 @@ pub fn quaternion_to_euler(w: f64, x: f64, y: f64, z: f64) -> [f64; 3] {
 /// Convert quaternion [w, x, y, z] to a 3x3 rotation matrix (row-major).
 fn quaternion_to_rotation(w: f64, x: f64, y: f64, z: f64) -> [[f64; 3]; 3] {
     [
-        [1.0 - 2.0*(y*y + z*z), 2.0*(x*y - z*w),       2.0*(x*z + y*w)],
-        [2.0*(x*y + z*w),       1.0 - 2.0*(x*x + z*z), 2.0*(y*z - x*w)],
-        [2.0*(x*z - y*w),       2.0*(y*z + x*w),       1.0 - 2.0*(x*x + y*y)],
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - z * w),
+            2.0 * (x * z + y * w),
+        ],
+        [
+            2.0 * (x * y + z * w),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - x * w),
+        ],
+        [
+            2.0 * (x * z - y * w),
+            2.0 * (y * z + x * w),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
     ]
+}
+
+/// Convert a 3x3 rotation matrix to quaternion [w, x, y, z].
+fn rotation_to_quaternion(m: &[[f64; 3]; 3]) -> [f64; 4] {
+    let trace = m[0][0] + m[1][1] + m[2][2];
+    if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        [
+            0.25 * s,
+            (m[2][1] - m[1][2]) / s,
+            (m[0][2] - m[2][0]) / s,
+            (m[1][0] - m[0][1]) / s,
+        ]
+    } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+        let s = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+        [
+            (m[2][1] - m[1][2]) / s,
+            0.25 * s,
+            (m[0][1] + m[1][0]) / s,
+            (m[0][2] + m[2][0]) / s,
+        ]
+    } else if m[1][1] > m[2][2] {
+        let s = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+        [
+            (m[0][2] - m[2][0]) / s,
+            (m[0][1] + m[1][0]) / s,
+            0.25 * s,
+            (m[1][2] + m[2][1]) / s,
+        ]
+    } else {
+        let s = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+        [
+            (m[1][0] - m[0][1]) / s,
+            (m[0][2] + m[2][0]) / s,
+            (m[1][2] + m[2][1]) / s,
+            0.25 * s,
+        ]
+    }
+}
+
+fn parse_rotation_matrix(data: &[u8]) -> [[f64; 3]; 3] {
+    let mut rot = [[0.0f64; 3]; 3];
+    let mut idx = 19usize;
+    for row in &mut rot {
+        for cell in row {
+            *cell = i16::from_le_bytes([data[idx], data[idx + 1]]) as f64 * SCALE;
+            idx += 2;
+        }
+    }
+    rot
+}
+
+#[derive(Clone, Copy)]
+enum RotationParseMode {
+    Auto,
+    Matrix,
+    Quaternion,
+}
+
+fn rotation_parse_mode() -> RotationParseMode {
+    static MODE: OnceLock<RotationParseMode> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        match std::env::var("XVISIO_ROTATION_PARSE")
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("matrix") => RotationParseMode::Matrix,
+            Some("quat") | Some("quaternion") => RotationParseMode::Quaternion,
+            _ => RotationParseMode::Auto,
+        }
+    })
+}
+
+/// XR50 packets are usually matrix-formatted at bytes [19..36].
+/// Keep a fallback for quaternion-formatted variants.
+fn is_plausible_rotation_matrix(m: &[[f64; 3]; 3]) -> bool {
+    let norm = |r: usize| m[r][0] * m[r][0] + m[r][1] * m[r][1] + m[r][2] * m[r][2];
+    let dot = |a: usize, b: usize| m[a][0] * m[b][0] + m[a][1] * m[b][1] + m[a][2] * m[b][2];
+    let n0 = norm(0);
+    let n1 = norm(1);
+    let n2 = norm(2);
+    if !(0.5..=1.5).contains(&n0) || !(0.5..=1.5).contains(&n1) || !(0.5..=1.5).contains(&n2) {
+        return false;
+    }
+    dot(0, 1).abs() < 0.7 && dot(0, 2).abs() < 0.7 && dot(1, 2).abs() < 0.7
 }
 
 /// Convert a 3x3 rotation matrix to Euler angles [roll, pitch, yaw] in degrees.
@@ -148,11 +267,7 @@ pub fn rotation_to_euler(m: &[[f64; 3]; 3]) -> [f64; 3] {
         let roll = m[0][1].atan2(m[1][1]);
         (roll, 0.0)
     };
-    [
-        roll.to_degrees(),
-        pitch.to_degrees(),
-        yaw.to_degrees(),
-    ]
+    [roll.to_degrees(), pitch.to_degrees(), yaw.to_degrees()]
 }
 
 /// Parse a 63-byte SLAM packet into a SlamSample.
@@ -162,8 +277,9 @@ pub fn rotation_to_euler(m: &[[f64; 3]; 3]) -> [f64; 3] {
 /// - `[1..2]`: 0xA2, 0x33 (command echo)
 /// - `[3..6]`: uint32 LE timestamp (microseconds)
 /// - `[7..18]`: 3x int32 LE translation (scaled by 2^-14)
-/// - `[19..26]`: quaternion [w, x, y, z] as 4x int16 LE (scaled by 2^-14)
-/// - `[27..36]`: extended rotation data (10 bytes, TBD)
+/// - `[19..36]`: rotation payload:
+///   - Common XR50 format: 9x int16 LE 3x3 rotation matrix (row-major)
+///   - Alternate format: quaternion [w, x, y, z] in first 8 bytes
 /// - `[37..62]`: extended data (IMU, confidence, padding)
 pub fn parse_slam_packet(data: &[u8], epoch: Instant) -> Option<SlamSample> {
     if data.len() < REPORT_SIZE {
@@ -185,21 +301,36 @@ pub fn parse_slam_packet(data: &[u8], epoch: Instant) -> Option<SlamSample> {
     let ty = i32::from_le_bytes([data[11], data[12], data[13], data[14]]) as f64 * SCALE;
     let tz = i32::from_le_bytes([data[15], data[16], data[17], data[18]]) as f64 * SCALE;
 
-    // Quaternion [w, x, y, z] (4x int16 LE, scaled)
-    // Wire format matches C++ libxvisio: bytes[19]=w, [21]=x, [23]=y, [25]=z
-    let qw = i16::from_le_bytes([data[19], data[20]]) as f64 * SCALE;
-    let qx = i16::from_le_bytes([data[21], data[22]]) as f64 * SCALE;
-    let qy = i16::from_le_bytes([data[23], data[24]]) as f64 * SCALE;
-    let qz = i16::from_le_bytes([data[25], data[26]]) as f64 * SCALE;
+    let parse_quaternion = || {
+        let w = i16::from_le_bytes([data[19], data[20]]) as f64 * SCALE;
+        let x = i16::from_le_bytes([data[21], data[22]]) as f64 * SCALE;
+        let y = i16::from_le_bytes([data[23], data[24]]) as f64 * SCALE;
+        let z = i16::from_le_bytes([data[25], data[26]]) as f64 * SCALE;
+        (quaternion_to_rotation(w, x, y, z), w, x, y, z)
+    };
 
-    // Store as [qx, qy, qz, qw] (SDK convention)
+    let (rotation, qw, qx, qy, qz) = match rotation_parse_mode() {
+        RotationParseMode::Quaternion => parse_quaternion(),
+        RotationParseMode::Matrix => {
+            let m = parse_rotation_matrix(data);
+            let [w, x, y, z] = rotation_to_quaternion(&m);
+            (m, w, x, y, z)
+        }
+        RotationParseMode::Auto => {
+            // Rotation payload at bytes [19..36] is usually a 3x3 matrix in XR50 packets.
+            let matrix_candidate = parse_rotation_matrix(data);
+            if is_plausible_rotation_matrix(&matrix_candidate) {
+                let [w, x, y, z] = rotation_to_quaternion(&matrix_candidate);
+                (matrix_candidate, w, x, y, z)
+            } else {
+                parse_quaternion()
+            }
+        }
+    };
+
+    // Store as [qx, qy, qz, qw] (SDK-facing convention).
     let quaternion = [qx, qy, qz, qw];
-
-    // Compute Euler angles from quaternion (matching C++ libxvisio main.cpp)
     let euler_deg = quaternion_to_euler(qw, qx, qy, qz);
-
-    // Build rotation matrix from quaternion for backwards compatibility
-    let rotation = quaternion_to_rotation(qw, qx, qy, qz);
 
     // Extended data [37..62]
     let mut raw_extended = [0u8; 26];
@@ -297,10 +428,13 @@ mod tests {
         assert!((sample.pose.translation[1] - 0.0018).abs() < 0.001);
         assert!((sample.pose.translation[2] - 0.0275).abs() < 0.001);
 
-        // Quaternion [qx, qy, qz, qw] from wire [w, x, y, z]
-        // Wire bytes [19-26]: 62 c0, 3a 03, 2d 06, 5a fd
-        // w=-0.994, x=0.050, y=0.097, z=-0.041
-        assert!((sample.pose.quaternion[3] - (-0.994)).abs() < 0.001); // qw
-        assert!((sample.pose.quaternion[0] - 0.050).abs() < 0.001);   // qx
+        // Rotation matrix payload should be decoded and remain normalized.
+        assert!((sample.pose.rotation[0][0] - (-0.994)).abs() < 0.01);
+        let qn = (sample.pose.quaternion[0] * sample.pose.quaternion[0]
+            + sample.pose.quaternion[1] * sample.pose.quaternion[1]
+            + sample.pose.quaternion[2] * sample.pose.quaternion[2]
+            + sample.pose.quaternion[3] * sample.pose.quaternion[3])
+            .sqrt();
+        assert!((qn - 1.0).abs() < 0.05);
     }
 }

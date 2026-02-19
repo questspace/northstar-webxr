@@ -20,18 +20,18 @@
 //! }
 //! ```
 
-pub mod error;
-pub mod types;
-pub mod protocol;
-pub mod hid;
 pub mod device;
-pub mod slam;
+pub mod error;
 pub mod ffi;
+pub mod hid;
+pub mod protocol;
+pub mod slam;
+pub mod types;
 
-pub use error::XvisioError;
-pub use types::*;
 pub use device::Device;
+pub use error::XvisioError;
 pub use slam::SlamStream;
+pub use types::*;
 
 /// Result type alias for xvisio operations.
 pub type Result<T> = std::result::Result<T, XvisioError>;

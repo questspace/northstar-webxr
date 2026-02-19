@@ -1,81 +1,31 @@
 # Vibestar
 
-macOS development environment for [Project NorthStar](https://docs.projectnorthstar.org) AR headset.
+Project NorthStar workspace with XR50 + Ultraleap integration experiments.
 
-## Hardware Status
+## Current Runtime Policy
+
+- **XR50 SLAM runtime:** run on **Linux or Windows**.
+- **macOS:** development/UI environment only for now.
+- **Why:** macOS receives XR50 packets at high rate, but tracking stays non-functional (`confidence ~0.001`, translation fixed at zero) across tested startup sequences/backends.
+
+See `xvisio-rs/SETUP.md` for the detailed status and commands.
+
+## Hardware Status (Latest)
 
 | Component | Model | Status |
 |-----------|-------|--------|
-| 6DOF Tracking | XVisio SeerSense XR50 | ✅ Working (982 Hz) |
-| Hand Tracking | Ultraleap Stereo IR 170 | ✅ Working (87 FPS, 20 joints/hand) |
+| 6DOF Tracking | XVisio SeerSense XR50 | ✅ Working on Linux/Windows, ❌ not production-ready on macOS |
+| Hand Tracking | Ultraleap Stereo IR 170 | ✅ Working |
 | Display | 2880×1600 @ 89Hz | ✅ Detected |
 
-## Quick Start
+## Recommended Setup
 
-### 6DOF Head Tracking (XVisio XR50)
+1. Connect XR50 runtime host (Linux/Windows) to XR50 and run `xvisio-rs`.
+2. Keep macOS for rendering/dev tooling.
+3. Stream pose data from runtime host to macOS app over network.
 
-```bash
-# Build driver
-cd libxvisio && mkdir -p build && cd build && cmake .. && make
+## Repository Pointers
 
-# Run visual test
-cd ../../visual-test && npm install
-sudo ../libxvisio/build/xvisio_test | node server.js
-```
-Open http://localhost:8080 — move the XR50 to see real-time 6DOF tracking.
-
-### Hand Tracking (Ultraleap SIR170)
-
-1. Install [Ultraleap Hand Tracking](https://developer.leapmotion.com/tracking-software-download) (Gemini V5+)
-2. The app automatically runs a WebSocket server on `ws://localhost:6437`
-
-```bash
-cd visual-test && python3 -m http.server 8080
-```
-Open http://localhost:8080/hands.html — wave your hands in front of the SIR170.
-
-## Architecture
-
-```
-XR50 Sensor → xvisio_test (C++) → JSON stdout → Node.js → WebSocket → Three.js
-SIR170 → Ultraleap Service → WebSocket (:6437) → Three.js
-```
-
-### Combined / NorthStar VR
-
-Ensure Ultraleap Hand Tracking app is running, then:
-
-```bash
-cd visual-test
-sudo ../libxvisio/build/xvisio_test | node server.js
-```
-
-| URL | Description |
-|-----|-------------|
-| http://localhost:8080/combined.html | Desktop preview (6DOF + hands) |
-| http://localhost:8080/northstar.html | **NorthStar stereo VR** |
-
-**NorthStar controls:**
-- **F** — Fullscreen (drag window to NorthStar display first)
-- **H** — Hide debug UI
-- Renders 1440×1600 per eye @ 89Hz
-
-## Structure
-
-```
-├── libxvisio/              # XVisio XR50 driver (C++)
-├── ultraleap-websocket/    # Ultraleap WebSocket server
-├── visual-test/            # Three.js visualization
-│   ├── index.html          # 6DOF tracking test
-│   ├── hands.html          # Hand tracking test
-│   ├── combined.html       # Combined XR50 + Ultraleap
-│   └── server.js           # XR50 WebSocket bridge
-└── project-esky-unity/     # Unity integration (WIP)
-```
-
-## Requirements
-
-- macOS
-- [Ultraleap Hand Tracking](https://developer.leapmotion.com/tracking-software-download) (Gemini V5+)
-- CMake, libusb, libwebsockets (`brew install cmake libusb libwebsockets`)
-- Node.js 18+
+- `xvisio-rs/` — active cross-platform XR50 SDK work.
+- `visual-test/` — frontend visualizations.
+- `MACOS_FIXES.md` — archived macOS investigation notes and findings.

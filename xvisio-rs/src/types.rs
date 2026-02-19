@@ -71,6 +71,6 @@ bitflags::bitflags! {
 pub enum SlamMode {
     /// On-device SLAM processing (edge6dof=1, embeddedAlgo=0).
     Edge = 0,
-    /// Mixed host+device SLAM processing (edge6dof=1, embeddedAlgo=1).
+    /// Mixed host+device SLAM processing (edge6dof=0, embeddedAlgo=1).
     Mixed = 1,
 }

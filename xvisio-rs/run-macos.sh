@@ -24,6 +24,7 @@ echo "Building example: $EXAMPLE"
 cargo build --release --example "$EXAMPLE" --manifest-path "$SCRIPT_DIR/Cargo.toml"
 
 BINARY="$SCRIPT_DIR/target/release/examples/$EXAMPLE"
+MAC_BACKEND="$(printf '%s' "${XVISIO_MAC_BACKEND:-rusb}" | tr '[:upper:]' '[:lower:]')"
 
 # Examples that don't need sudo
 case "$EXAMPLE" in
@@ -35,9 +36,23 @@ case "$EXAMPLE" in
         ;;
 esac
 
-# SLAM examples need sudo on macOS
+# SLAM examples:
+# - rusb backend needs sudo (kernel driver detach/claim)
+# - hidapi backend runs as normal user (shared HID open)
 echo ""
-echo "SLAM streaming requires root on macOS (to detach kernel HID driver)."
-echo "Running: sudo $BINARY"
-echo ""
-sudo RUST_LOG=info "$BINARY"
+echo "Effective macOS backend: $MAC_BACKEND"
+if [ "$MAC_BACKEND" = "hidapi" ]; then
+    echo "Using macOS HIDAPI backend (no sudo)."
+    echo "Running: $BINARY"
+    echo ""
+    RUST_LOG=info "$BINARY"
+elif [ "$MAC_BACKEND" = "rusb" ]; then
+    echo "Using macOS RUSB backend (requires root for detach/claim)."
+    echo "Running: sudo $BINARY"
+    echo ""
+    sudo --preserve-env=RUST_LOG,XVISIO_MAC_BACKEND,XVISIO_UVC_MODE,XVISIO_ROTATION_ENABLED,XVISIO_ROTATION_PARSE,XVISIO_CLAIM_ALL_INTERFACES,XVISIO_PRECONDITION_CYCLES,XVISIO_ENABLE_STEREO_INIT,XVISIO_REOPEN_AFTER_CONFIG,XVISIO_REOPEN_AFTER_EDGE_START,XVISIO_ALLOW_DETACH_FALLBACK,XVISIO_DEBUG_RAW \
+      RUST_LOG=info "$BINARY"
+else
+    echo "Unknown XVISIO_MAC_BACKEND='$MAC_BACKEND' (expected: hidapi|rusb)"
+    exit 2
+fi

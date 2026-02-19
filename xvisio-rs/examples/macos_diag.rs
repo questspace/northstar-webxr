@@ -22,12 +22,18 @@ const HID_INTERFACE: u8 = 3;
 const SLAM_ENDPOINT: u8 = 0x83;
 const SCALE: f64 = 6.103515625e-05;
 
-fn find_and_open(timeout_secs: u64, interval_ms: u64) -> Option<(rusb::DeviceHandle<rusb::GlobalContext>, u8, u8)> {
+fn find_and_open(
+    timeout_secs: u64,
+    interval_ms: u64,
+) -> Option<(rusb::DeviceHandle<rusb::GlobalContext>, u8, u8)> {
     let start = Instant::now();
     let mut attempt = 0u32;
     while start.elapsed() < Duration::from_secs(timeout_secs) {
         attempt += 1;
-        let devices = match rusb::devices() { Ok(d) => d, Err(_) => continue };
+        let devices = match rusb::devices() {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
         if let Some(dev) = devices.iter().find(|d| {
             d.device_descriptor()
                 .map(|desc| desc.vendor_id() == VID && desc.product_id() == PID)
@@ -37,8 +43,13 @@ fn find_and_open(timeout_secs: u64, interval_ms: u64) -> Option<(rusb::DeviceHan
                 let bus = dev.bus_number();
                 let addr = dev.address();
                 if attempt <= 3 || attempt % 10 == 0 {
-                    println!("    Found: bus {} addr {} ({:.1}s, attempt {})",
-                        bus, addr, start.elapsed().as_secs_f64(), attempt);
+                    println!(
+                        "    Found: bus {} addr {} ({:.1}s, attempt {})",
+                        bus,
+                        addr,
+                        start.elapsed().as_secs_f64(),
+                        attempt
+                    );
                 }
                 return Some((h, bus, addr));
             }
@@ -49,9 +60,22 @@ fn find_and_open(timeout_secs: u64, interval_ms: u64) -> Option<(rusb::DeviceHan
 }
 
 fn send_cmd(handle: &rusb::DeviceHandle<rusb::GlobalContext>, cmd: &[u8; 63], label: &str) -> bool {
-    match handle.write_control(0x21, 0x09, 0x0202, HID_INTERFACE as u16, cmd, Duration::from_secs(2)) {
-        Ok(n) => { println!("    {} OK ({} bytes)", label, n); true }
-        Err(e) => { println!("    {} FAILED: {}", label, e); false }
+    match handle.write_control(
+        0x21,
+        0x09,
+        0x0202,
+        HID_INTERFACE as u16,
+        cmd,
+        Duration::from_secs(2),
+    ) {
+        Ok(n) => {
+            println!("    {} OK ({} bytes)", label, n);
+            true
+        }
+        Err(e) => {
+            println!("    {} FAILED: {}", label, e);
+            false
+        }
     }
 }
 
@@ -66,8 +90,12 @@ fn build_cmd(bytes: &[u8]) -> [u8; 63] {
 /// Detach + claim all interfaces cycle (for preconditioning)
 fn detach_claim_release(handle: &rusb::DeviceHandle<rusb::GlobalContext>) {
     handle.detach_kernel_driver(HID_INTERFACE).ok();
-    for i in 0..=3u8 { handle.claim_interface(i).ok(); }
-    for i in 0..=3u8 { handle.release_interface(i).ok(); }
+    for i in 0..=3u8 {
+        handle.claim_interface(i).ok();
+    }
+    for i in 0..=3u8 {
+        handle.release_interface(i).ok();
+    }
 }
 
 /// Read SLAM with extended data inspection
@@ -76,7 +104,10 @@ fn read_slam_extended(
     max_seconds: u64,
     label: &str,
 ) -> (u64, u64) {
-    println!("    Reading SLAM for {}s [{}] (MOVE DEVICE!)...", max_seconds, label);
+    println!(
+        "    Reading SLAM for {}s [{}] (MOVE DEVICE!)...",
+        max_seconds, label
+    );
     let start = Instant::now();
     let mut count = 0u64;
     let mut tracking = 0u64;
@@ -87,32 +118,67 @@ fn read_slam_extended(
         match handle.read_interrupt(SLAM_ENDPOINT, &mut buf, Duration::from_millis(200)) {
             Ok(n) if n >= 27 => {
                 count += 1;
-                let base = if buf[0] == 0x01 && buf[1] == 0xA2 && buf[2] == 0x33 { 7usize }
-                           else if buf[0] == 0xA2 && buf[1] == 0x33 { 6usize }
-                           else { continue };
-                if n < base + 20 { continue; }
+                let base = if buf[0] == 0x01 && buf[1] == 0xA2 && buf[2] == 0x33 {
+                    7usize
+                } else if buf[0] == 0xA2 && buf[1] == 0x33 {
+                    6usize
+                } else {
+                    continue;
+                };
+                if n < base + 20 {
+                    continue;
+                }
 
-                let tx = i32::from_le_bytes([buf[base], buf[base+1], buf[base+2], buf[base+3]]) as f64 * SCALE;
-                let ty = i32::from_le_bytes([buf[base+4], buf[base+5], buf[base+6], buf[base+7]]) as f64 * SCALE;
-                let tz = i32::from_le_bytes([buf[base+8], buf[base+9], buf[base+10], buf[base+11]]) as f64 * SCALE;
-                let qw = i16::from_le_bytes([buf[base+12], buf[base+13]]) as f64 * SCALE;
-                let qx = i16::from_le_bytes([buf[base+14], buf[base+15]]) as f64 * SCALE;
-                let qy = i16::from_le_bytes([buf[base+16], buf[base+17]]) as f64 * SCALE;
-                let qz = i16::from_le_bytes([buf[base+18], buf[base+19]]) as f64 * SCALE;
+                let tx =
+                    i32::from_le_bytes([buf[base], buf[base + 1], buf[base + 2], buf[base + 3]])
+                        as f64
+                        * SCALE;
+                let ty = i32::from_le_bytes([
+                    buf[base + 4],
+                    buf[base + 5],
+                    buf[base + 6],
+                    buf[base + 7],
+                ]) as f64
+                    * SCALE;
+                let tz = i32::from_le_bytes([
+                    buf[base + 8],
+                    buf[base + 9],
+                    buf[base + 10],
+                    buf[base + 11],
+                ]) as f64
+                    * SCALE;
+                let qw = i16::from_le_bytes([buf[base + 12], buf[base + 13]]) as f64 * SCALE;
+                let qx = i16::from_le_bytes([buf[base + 14], buf[base + 15]]) as f64 * SCALE;
+                let qy = i16::from_le_bytes([buf[base + 16], buf[base + 17]]) as f64 * SCALE;
+                let qz = i16::from_le_bytes([buf[base + 18], buf[base + 19]]) as f64 * SCALE;
 
-                let is_tracking = tx.abs() > 1e-6 || ty.abs() > 1e-6 || tz.abs() > 1e-6
-                    || (qw - 1.0).abs() > 0.01 || qx.abs() > 0.01 || qy.abs() > 0.01 || qz.abs() > 0.01;
-                if is_tracking { tracking += 1; }
+                let is_tracking = tx.abs() > 1e-6
+                    || ty.abs() > 1e-6
+                    || tz.abs() > 1e-6
+                    || (qw - 1.0).abs() > 0.01
+                    || qx.abs() > 0.01
+                    || qy.abs() > 0.01
+                    || qz.abs() > 0.01;
+                if is_tracking {
+                    tracking += 1;
+                }
 
                 // Print first 3 packets with FULL raw dump + extended data
                 if count <= 3 {
                     print!("    pkt#{} raw: ", count);
-                    for i in 0..n.min(63) { print!("{:02x}", buf[i]); if i == 2 || i == 6 || i == 18 || i == 26 || i == 36 { print!(" "); } }
+                    for i in 0..n.min(63) {
+                        print!("{:02x}", buf[i]);
+                        if i == 2 || i == 6 || i == 18 || i == 26 || i == 36 {
+                            print!(" ");
+                        }
+                    }
                     println!();
 
                     let tag = if is_tracking { "TRACKING!" } else { "identity" };
-                    println!("      pos=[{:+.4},{:+.4},{:+.4}] q=[w{:.4},x{:.4},y{:.4},z{:.4}] [{}]",
-                        tx, ty, tz, qw, qx, qy, qz, tag);
+                    println!(
+                        "      pos=[{:+.4},{:+.4},{:+.4}] q=[w{:.4},x{:.4},y{:.4},z{:.4}] [{}]",
+                        tx, ty, tz, qw, qx, qy, qz, tag
+                    );
 
                     // Extended data: IMU + confidence
                     if n >= 49 {
@@ -122,11 +188,16 @@ fn read_slam_extended(
                         let gx = i16::from_le_bytes([buf[43], buf[44]]) as f64 * SCALE;
                         let gy = i16::from_le_bytes([buf[45], buf[46]]) as f64 * SCALE;
                         let gz = i16::from_le_bytes([buf[47], buf[48]]) as f64 * SCALE;
-                        println!("      accel=[{:+.4},{:+.4},{:+.4}] gyro=[{:+.4},{:+.4},{:+.4}]",
-                            ax, ay, az, gx, gy, gz);
+                        println!(
+                            "      accel=[{:+.4},{:+.4},{:+.4}] gyro=[{:+.4},{:+.4},{:+.4}]",
+                            ax, ay, az, gx, gy, gz
+                        );
                         if n >= 59 {
                             let conf = i16::from_le_bytes([buf[57], buf[58]]) as f64 * SCALE;
-                            println!("      confidence={:.4} raw_57_58=[{:02x}{:02x}]", conf, buf[57], buf[58]);
+                            println!(
+                                "      confidence={:.4} raw_57_58=[{:02x}{:02x}]",
+                                conf, buf[57], buf[58]
+                            );
                         }
                     }
                 }
@@ -134,8 +205,16 @@ fn read_slam_extended(
                 // Periodic summary
                 if count % 5000 == 0 {
                     let tag = if is_tracking { "TRACKING" } else { "identity" };
-                    println!("    #{} ({:.0} Hz): pos=[{:+.4},{:+.4},{:+.4}] q=[w{:.4}] [{}]",
-                        count, count as f64 / start.elapsed().as_secs_f64(), tx, ty, tz, qw, tag);
+                    println!(
+                        "    #{} ({:.0} Hz): pos=[{:+.4},{:+.4},{:+.4}] q=[w{:.4}] [{}]",
+                        count,
+                        count as f64 / start.elapsed().as_secs_f64(),
+                        tx,
+                        ty,
+                        tz,
+                        qw,
+                        tag
+                    );
                 }
 
                 if is_tracking && tracking <= 5 {
@@ -148,17 +227,27 @@ fn read_slam_extended(
             Err(rusb::Error::Pipe) => {
                 errors += 1;
                 handle.clear_halt(SLAM_ENDPOINT).ok();
-                if errors > 50 { break; }
+                if errors > 50 {
+                    break;
+                }
             }
             Err(_) => {
                 errors += 1;
-                if errors > 50 { break; }
+                if errors > 50 {
+                    break;
+                }
             }
         }
     }
     let elapsed = start.elapsed().as_secs_f64();
-    println!("    => {} pkts ({:.0} Hz), {} tracking, {} errors [{:.0}s]",
-        count, count as f64 / elapsed.max(0.001), tracking, errors, elapsed);
+    println!(
+        "    => {} pkts ({:.0} Hz), {} tracking, {} errors [{:.0}s]",
+        count,
+        count as f64 / elapsed.max(0.001),
+        tracking,
+        errors,
+        elapsed
+    );
     (count, tracking)
 }
 
@@ -176,18 +265,25 @@ fn main() {
     println!("=== STEP 1: Preconditioning (detach+claim+release x2) ===");
     for round in 1..=2 {
         if let Some((handle, _, _)) = find_and_open(5, 300) {
-            println!("  Round {}: detach + claim all + configure + release", round);
+            println!(
+                "  Round {}: detach + claim all + configure + release",
+                round
+            );
             detach_claim_release(&handle);
             // Re-open after detach re-enum
             std::thread::sleep(Duration::from_millis(500));
             if let Some((h2, _, _)) = find_and_open(5, 100) {
                 h2.detach_kernel_driver(HID_INTERFACE).ok();
-                for i in 0..=3u8 { h2.claim_interface(i).ok(); }
+                for i in 0..=3u8 {
+                    h2.claim_interface(i).ok();
+                }
                 let cfg = build_cmd(&[0x19, 0x95, 0x01, 0x00, 0x00]);
                 send_cmd(&h2, &cfg, &format!("Configure round {}", round));
                 let edge = build_cmd(&[0xA2, 0x33, 0x01, 0x00, 0x00]);
                 send_cmd(&h2, &edge, &format!("Edge stream round {}", round));
-                for i in 0..=3u8 { h2.release_interface(i).ok(); }
+                for i in 0..=3u8 {
+                    h2.release_interface(i).ok();
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -207,7 +303,12 @@ fn main() {
             for i in [3u8, 1, 2, 0] {
                 match h.claim_interface(i) {
                     Ok(_) => print!("  +iface{}", i),
-                    Err(e) => { print!("  -iface{}({})", i, e); if i == 3 { ok = false; } }
+                    Err(e) => {
+                        print!("  -iface{}({})", i, e);
+                        if i == 3 {
+                            ok = false;
+                        }
+                    }
                 }
             }
             println!();
@@ -340,13 +441,18 @@ fn main() {
     }
 
     // Cleanup
-    for i in 0..=3u8 { handle.release_interface(i).ok(); }
+    for i in 0..=3u8 {
+        handle.release_interface(i).ok();
+    }
 
     // =========================================================================
     // Summary
     // =========================================================================
     println!("\n=== SUMMARY ===");
-    println!("  Total tracking packets across all tests: {}", total_tracking);
+    println!(
+        "  Total tracking packets across all tests: {}",
+        total_tracking
+    );
     if total_tracking > 0 {
         println!("  >>> SOME TEST PRODUCED TRACKING DATA! <<<");
     } else {
