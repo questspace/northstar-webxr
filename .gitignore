@@ -49,6 +49,7 @@ UserSettings/
 # Logs & Debug
 *.log
 *.pid
+/logs/
 
 # Local tooling/cache artifacts
 .vcpkg-buildtrees/
