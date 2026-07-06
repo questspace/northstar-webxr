@@ -3,6 +3,7 @@ import { useFrame, useThree, createPortal } from '@react-three/fiber'
 import { useFBO } from '@react-three/drei'
 import * as THREE from 'three'
 import { useTrackingStore } from '../stores/tracking'
+import { useCalibrationProfilesStore } from '../stores/calibrationProfiles'
 import { xr50ToScene, xr50ToEuler } from '../lib/transforms'
 import { type NorthStarCalibration } from '../lib/calibration'
 import { Scene } from './Scene'
@@ -10,6 +11,7 @@ import { Hands } from './Hands'
 
 interface Props {
   calibration: NorthStarCalibration
+  outputMode?: 'panel' | 'viewer'
 }
 
 const NEAR = 0.01
@@ -32,21 +34,24 @@ uniform float leftCoeffsX[16];
 uniform float leftCoeffsY[16];
 uniform float rightCoeffsX[16];
 uniform float rightCoeffsY[16];
+uniform float leftUvScale;
+uniform float rightUvScale;
+uniform vec2 leftUvOffset;
+uniform vec2 rightUvOffset;
 uniform bool undistortionEnabled;
 varying vec2 vUv;
 
 vec2 evalPoly(float cx[16], float cy[16], vec2 uv) {
   float u = uv.x, v = uv.y;
   float u2 = u*u, v2 = v*v, u3 = u2*u, v3 = v2*v;
-  float uv1 = u*v, u2v = u2*v, uv2 = u*v2;
-  float u2v2 = u2*v2, u3v = u3*v, uv3 = u*v3;
-  float u3v2 = u3*v2, u2v3 = u2*v3, u3v3 = u3*v3;
 
+  // Northstar V2 coefficients are numpy polyvander2d row-major:
+  // c00, c01*v, c02*v^2, c03*v^3, c10*u, c11*u*v, ...
   return vec2(
-    cx[0]+cx[1]*u+cx[2]*v+cx[3]*uv1+cx[4]*u2+cx[5]*v2+cx[6]*u2v+cx[7]*uv2
-    +cx[8]*u3+cx[9]*v3+cx[10]*u2v2+cx[11]*u3v+cx[12]*uv3+cx[13]*u3v2+cx[14]*u2v3+cx[15]*u3v3,
-    cy[0]+cy[1]*u+cy[2]*v+cy[3]*uv1+cy[4]*u2+cy[5]*v2+cy[6]*u2v+cy[7]*uv2
-    +cy[8]*u3+cy[9]*v3+cy[10]*u2v2+cy[11]*u3v+cy[12]*uv3+cy[13]*u3v2+cy[14]*u2v3+cy[15]*u3v3
+    cx[0]+cx[1]*v+cx[2]*v2+cx[3]*v3+cx[4]*u+cx[5]*u*v+cx[6]*u*v2+cx[7]*u*v3
+    +cx[8]*u2+cx[9]*u2*v+cx[10]*u2*v2+cx[11]*u2*v3+cx[12]*u3+cx[13]*u3*v+cx[14]*u3*v2+cx[15]*u3*v3,
+    cy[0]+cy[1]*v+cy[2]*v2+cy[3]*v3+cy[4]*u+cy[5]*u*v+cy[6]*u*v2+cy[7]*u*v3
+    +cy[8]*u2+cy[9]*u2*v+cy[10]*u2*v2+cy[11]*u2*v3+cy[12]*u3+cy[13]*u3*v+cy[14]*u3*v2+cy[15]*u3*v3
   );
 }
 
@@ -55,11 +60,13 @@ void main() {
   if (uv.x < 0.5) {
     vec2 eyeUv = vec2(uv.x * 2.0, uv.y);
     if (undistortionEnabled) eyeUv = evalPoly(leftCoeffsX, leftCoeffsY, eyeUv);
+    eyeUv = (eyeUv - vec2(0.5)) * leftUvScale + vec2(0.5) + leftUvOffset;
     gl_FragColor = (eyeUv.x<0.0||eyeUv.x>1.0||eyeUv.y<0.0||eyeUv.y>1.0)
       ? vec4(0.0) : texture2D(leftEye, eyeUv);
   } else {
     vec2 eyeUv = vec2((uv.x - 0.5) * 2.0, uv.y);
     if (undistortionEnabled) eyeUv = evalPoly(rightCoeffsX, rightCoeffsY, eyeUv);
+    eyeUv = (eyeUv - vec2(0.5)) * rightUvScale + vec2(0.5) + rightUvOffset;
     gl_FragColor = (eyeUv.x<0.0||eyeUv.x>1.0||eyeUv.y<0.0||eyeUv.y>1.0)
       ? vec4(0.0) : texture2D(rightEye, eyeUv);
   }
@@ -91,6 +98,8 @@ void main() {
  */
 const _rotMat = new THREE.Matrix4()
 const _deltaQuat = new THREE.Quaternion()
+const identityPolyX = Array.from({ length: 16 }, (_, i) => (i === 4 ? 1 : 0))
+const identityPolyY = Array.from({ length: 16 }, (_, i) => (i === 1 ? 1 : 0))
 
 const computeHomography = (
   renderQuat: THREE.Quaternion,
@@ -105,7 +114,7 @@ const computeHomography = (
   return out
 }
 
-export function NorthStarRenderer({ calibration }: Props) {
+export function NorthStarRenderer({ calibration, outputMode = 'panel' }: Props) {
   const { gl } = useThree()
   const cameraRigRef = useRef<THREE.Group>(null)
   const undistortionRef = useRef(true)
@@ -162,6 +171,10 @@ export function NorthStarRenderer({ calibration }: Props) {
         leftCoeffsY: { value: arr(calibration.leftEye.uvToRectY) },
         rightCoeffsX: { value: arr(calibration.rightEye.uvToRectX) },
         rightCoeffsY: { value: arr(calibration.rightEye.uvToRectY) },
+        leftUvScale: { value: 1.0 },
+        rightUvScale: { value: 1.0 },
+        leftUvOffset: { value: new THREE.Vector2(0, 0) },
+        rightUvOffset: { value: new THREE.Vector2(0, 0) },
         undistortionEnabled: { value: true },
       },
       vertexShader: VERT, fragmentShader: COMPOSE_FRAG,
@@ -220,16 +233,45 @@ export function NorthStarRenderer({ calibration }: Props) {
       }
     }
     window.addEventListener('keydown', onKey)
-    gl.domElement.style.transform = 'scaleX(-1)'
+    gl.domElement.style.transform = outputMode === 'panel' ? 'scaleX(-1)' : 'none'
     return () => window.removeEventListener('keydown', onKey)
-  }, [gl, composeMaterial, reprojMaterial])
+  }, [gl, composeMaterial, reprojMaterial, outputMode])
 
   // ---- Main render loop ----
   useFrame(() => {
     if (!cameraRigRef.current) return
+    const profile = useCalibrationProfilesStore.getState().settings
     const { headPose } = useTrackingStore.getState()
     const pos = xr50ToScene(headPose.x, headPose.y, headPose.z)
     const rot = xr50ToEuler(headPose.roll, headPose.pitch, headPose.yaw)
+
+    const blend = (base: number[], identity: number[], strength: number) =>
+      base.map((v, i) => identity[i] + (v - identity[i]) * strength)
+
+    const panelOutput = outputMode === 'panel'
+    composeMaterial.uniforms.undistortionEnabled.value = panelOutput && undistortionRef.current
+    composeMaterial.uniforms.leftCoeffsX.value = panelOutput
+      ? blend(Array.from(calibration.leftEye.uvToRectX), identityPolyX, profile.distortionStrength)
+      : identityPolyX
+    composeMaterial.uniforms.leftCoeffsY.value = panelOutput
+      ? blend(Array.from(calibration.leftEye.uvToRectY), identityPolyY, profile.distortionStrength)
+      : identityPolyY
+    composeMaterial.uniforms.rightCoeffsX.value = panelOutput
+      ? blend(Array.from(calibration.rightEye.uvToRectX), identityPolyX, profile.distortionStrength)
+      : identityPolyX
+    composeMaterial.uniforms.rightCoeffsY.value = panelOutput
+      ? blend(Array.from(calibration.rightEye.uvToRectY), identityPolyY, profile.distortionStrength)
+      : identityPolyY
+    composeMaterial.uniforms.leftUvScale.value = panelOutput ? profile.leftUvScale : 1
+    composeMaterial.uniforms.rightUvScale.value = panelOutput ? profile.rightUvScale : 1
+    composeMaterial.uniforms.leftUvOffset.value.set(
+      panelOutput ? profile.leftUvOffsetX : 0,
+      panelOutput ? profile.leftUvOffsetY : 0,
+    )
+    composeMaterial.uniforms.rightUvOffset.value.set(
+      panelOutput ? profile.rightUvOffsetX : 0,
+      panelOutput ? profile.rightUvOffsetY : 0,
+    )
 
     cameraRigRef.current.position.copy(pos)
     cameraRigRef.current.rotation.copy(rot)
@@ -280,10 +322,12 @@ export function NorthStarRenderer({ calibration }: Props) {
   return (
     <>
       {createPortal(
-        <group ref={cameraRigRef}>
+        <>
           <Scene />
-          <Hands />
-        </group>,
+          <group ref={cameraRigRef}>
+            <Hands />
+          </group>
+        </>,
         virtualScene,
       )}
     </>

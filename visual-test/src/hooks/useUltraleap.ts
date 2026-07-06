@@ -2,7 +2,45 @@ import { useEffect, useRef } from 'react'
 import { useTrackingStore, type HandData, type HandJoint } from '../stores/tracking'
 
 const LEAP_WS_URL = 'ws://localhost:6437/v6.json'
+const LEAP_HTTP_URL = 'http://localhost:6437/v6.json'
+const HYPERION_WS_URL = 'ws://localhost:1024'
 const RECONNECT_DELAY = 2000
+
+const canReachLeap = async () => {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 800)
+  try {
+    await fetch(LEAP_HTTP_URL, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    return true
+  } catch {
+    return false
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+const canOpenWebSocket = (url: string) =>
+  new Promise<boolean>((resolve) => {
+    const ws = new WebSocket(url)
+    const timeout = window.setTimeout(() => {
+      ws.close()
+      resolve(false)
+    }, 800)
+
+    ws.onopen = () => {
+      window.clearTimeout(timeout)
+      ws.close()
+      resolve(true)
+    }
+    ws.onerror = () => {
+      window.clearTimeout(timeout)
+      resolve(false)
+    }
+  })
 
 interface LeapPointable {
   handId: number
@@ -47,23 +85,46 @@ const parseHand = (hand: LeapHand, pointables: LeapPointable[]): HandData => {
  * Connects to the Ultraleap Gemini WebSocket and pushes
  * hand data into the Zustand store.
  */
-export const useUltraleap = () => {
+export const useUltraleap = (enabled = true) => {
   const wsRef = useRef<WebSocket | null>(null)
   const frameCountRef = useRef(0)
   const lastFpsTimeRef = useRef(Date.now())
 
   useEffect(() => {
+    if (!enabled) return
+
     let reconnectTimer: ReturnType<typeof setTimeout>
     let alive = true
 
-    const connect = () => {
+    const connect = async () => {
       if (!alive) return
+      const store = useTrackingStore.getState()
+      store.setLeapStatus('Checking Ultraleap websocket on localhost:6437')
+
+      if (!(await canReachLeap())) {
+        store.setLeapConnected(false)
+        store.setHands(null, null)
+        const hyperionRunning = await canOpenWebSocket(HYPERION_WS_URL)
+        store.setLeapStatus(
+          hyperionRunning
+            ? 'Hyperion websocket detected on localhost:1024; v6 JSON bridge is not running on localhost:6437'
+            : 'Ultraleap websocket not running on localhost:6437',
+        )
+        reconnectTimer = setTimeout(connect, RECONNECT_DELAY)
+        return
+      }
+
+      store.setLeapStatus('Connecting to Ultraleap websocket')
       const ws = new WebSocket(LEAP_WS_URL)
       wsRef.current = ws
 
       ws.onopen = () => {
-        console.log('[Ultraleap] connected')
-        useTrackingStore.getState().setLeapConnected(true)
+        const next = useTrackingStore.getState()
+        next.setLeapConnected(true)
+        next.setLeapStatus('Ultraleap connected')
+        ws.send(JSON.stringify({ optimizeHMD: true }))
+        ws.send(JSON.stringify({ background: true }))
+        ws.send(JSON.stringify({ focused: true }))
         ws.send(JSON.stringify({ enableGestures: true }))
       }
 
@@ -96,8 +157,9 @@ export const useUltraleap = () => {
       }
 
       ws.onclose = () => {
-        console.log('[Ultraleap] disconnected')
-        useTrackingStore.getState().setLeapConnected(false)
+        const next = useTrackingStore.getState()
+        next.setLeapConnected(false)
+        next.setLeapStatus('Ultraleap disconnected')
         if (alive) reconnectTimer = setTimeout(connect, RECONNECT_DELAY)
       }
 
@@ -110,6 +172,7 @@ export const useUltraleap = () => {
       alive = false
       clearTimeout(reconnectTimer)
       wsRef.current?.close()
+      useTrackingStore.getState().setLeapStatus('Ultraleap disabled')
     }
-  }, [])
+  }, [enabled])
 }

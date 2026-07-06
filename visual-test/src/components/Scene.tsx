@@ -9,9 +9,38 @@ export function Scene() {
       <ambientLight intensity={0.4} />
       <directionalLight position={[5, 10, 5]} intensity={0.8} castShadow />
       <gridHelper args={[20, 40, 0x444466, 0x333355]} />
+      <CalibrationAnchors />
       {Array.from({ length: 20 }, (_, i) => (
         <FloatingCube key={i} seed={i} />
       ))}
+    </>
+  )
+}
+
+function CalibrationAnchors() {
+  const anchors = [
+    { position: [0, 1.6, -0.5], size: 0.035, color: 0xff4444 },
+    { position: [-0.18, 1.6, -1.0], size: 0.05, color: 0x00ff88 },
+    { position: [0.18, 1.6, -1.0], size: 0.05, color: 0x66ccff },
+    { position: [0, 1.6, -1.8], size: 0.075, color: 0xffffff },
+  ] as const
+
+  return (
+    <>
+      {anchors.map((anchor) => (
+        <mesh key={anchor.color} position={anchor.position}>
+          <sphereGeometry args={[anchor.size, 24, 24]} />
+          <meshPhongMaterial color={anchor.color} emissive={anchor.color} emissiveIntensity={0.65} />
+        </mesh>
+      ))}
+      <mesh position={[0, 1.6, -1.0]} rotation={[0, 0, Math.PI / 4]}>
+        <boxGeometry args={[0.36, 0.006, 0.006]} />
+        <meshBasicMaterial color={0xffffff} />
+      </mesh>
+      <mesh position={[0, 1.6, -1.0]} rotation={[0, 0, -Math.PI / 4]}>
+        <boxGeometry args={[0.36, 0.006, 0.006]} />
+        <meshBasicMaterial color={0xffffff} />
+      </mesh>
     </>
   )
 }

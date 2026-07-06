@@ -90,13 +90,9 @@ impl HidTransport {
             .write(&cmd_buf)
             .map_err(|e| XvisioError::HidCommand(format!("Configure write failed: {}", e)))?;
 
+        // This command does not reliably ACK on Windows. Do not call
+        // get_input_report() here: hidapi has no timeout for that path.
         std::thread::sleep(std::time::Duration::from_millis(20));
-
-        // Read response (may be all zeros, that's OK)
-        let mut recv_buf = [0u8; REPORT_SIZE + 1];
-        recv_buf[0] = PREFIX_DEVICE_TO_HOST;
-        let _ = self.device.get_input_report(&mut recv_buf);
-
         Ok(())
     }
 
@@ -119,12 +115,9 @@ impl HidTransport {
             .write(&cmd_buf)
             .map_err(|e| XvisioError::HidCommand(format!("Edge stream cmd failed: {}", e)))?;
 
+        // This command starts the interrupt stream; some firmware does not
+        // send a control-report ACK, so waiting for one can deadlock startup.
         std::thread::sleep(std::time::Duration::from_millis(20));
-
-        let mut recv_buf = [0u8; REPORT_SIZE + 1];
-        recv_buf[0] = PREFIX_DEVICE_TO_HOST;
-        let _ = self.device.get_input_report(&mut recv_buf);
-
         Ok(())
     }
 

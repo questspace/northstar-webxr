@@ -102,17 +102,16 @@ fn handle_connection(
     }
 }
 
-/// Handle WebSocket — add to broadcast list, wait for disconnect.
+/// Handle WebSocket by adding it to the broadcast list.
 ///
-/// The SLAM thread is the sole writer to the WebSocket (no mutex contention).
-/// This thread just stays alive and detects when the client is removed from
-/// the broadcast list (due to send failure in the SLAM thread).
+/// The SLAM thread owns writes and removes stale clients on send failure.
+/// A read loop here would contend with the broadcaster and stall pose updates.
 fn handle_websocket(
     stream: TcpStream,
     clients: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>>>,
 ) {
-    // Write timeout prevents the SLAM thread from blocking on a slow client
-    stream.set_write_timeout(Some(Duration::from_secs(2))).ok();
+    // Keep dead clients from blocking the SLAM broadcaster.
+    stream.set_write_timeout(Some(Duration::from_millis(50))).ok();
 
     let ws = match tungstenite::accept(stream) {
         Ok(ws) => ws,
@@ -128,21 +127,6 @@ fn handle_websocket(
         list.push(ws.clone());
         eprintln!("[WS] Client connected ({} total)", list.len());
     }
-
-    // Wait until the SLAM thread removes us from the client list (send failure)
-    // or the TCP connection drops.
-    loop {
-        std::thread::sleep(Duration::from_secs(1));
-        let still_active = clients.lock().unwrap().iter().any(|c| Arc::ptr_eq(c, &ws));
-        if !still_active {
-            break;
-        }
-    }
-
-    eprintln!(
-        "[WS] Client disconnected ({} total)",
-        clients.lock().unwrap().len()
-    );
 }
 
 /// Serve static files from dist/ over HTTP.
@@ -224,94 +208,104 @@ fn slam_loop(
     clients: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>>>,
     running: Arc<AtomicBool>,
 ) {
-    eprintln!("[XR50] Opening device...");
-
-    let mut device = match xvisio::Device::open_first() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("[XR50] Failed to open device: {}", e);
-            eprintln!("[XR50] Server will continue without tracking data.");
-            eprintln!("[XR50] Plug in the XR50 and restart the server.");
-            while running.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_secs(1));
-            }
-            return;
-        }
-    };
-
-    eprintln!("[XR50] UUID:     {}", device.uuid());
-    eprintln!("[XR50] Version:  {}", device.version());
-    eprintln!("[XR50] Features: {:?}", device.features());
-
-    let stream = match device.start_slam(xvisio::SlamMode::Edge) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[XR50] Failed to start SLAM: {}", e);
-            return;
-        }
-    };
-
-    eprintln!("[XR50] Streaming SLAM data to WebSocket clients...");
-
-    let mut count: u64 = 0;
-    let mut ws_sent: u64 = 0;
-    let mut last_report = std::time::Instant::now();
-    let mut last_broadcast = std::time::Instant::now();
-    let broadcast_interval = Duration::from_millis(16); // ~60 Hz to browser
-
     while running.load(Ordering::Relaxed) {
-        let sample = match stream.recv_timeout(Duration::from_secs(2)) {
-            Ok(s) => s,
-            Err(xvisio::XvisioError::Timeout) => continue,
+        eprintln!("[XR50] Opening device...");
+
+        let mut device = match xvisio::Device::open_first() {
+            Ok(d) => d,
             Err(e) => {
-                eprintln!("[XR50] Error: {}", e);
-                break;
+                eprintln!("[XR50] Failed to open device: {}", e);
+                eprintln!("[XR50] Retrying in 1s...");
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
             }
         };
 
-        count += 1;
-        let now = std::time::Instant::now();
+        eprintln!("[XR50] UUID:     {}", device.uuid());
+        eprintln!("[XR50] Version:  {}", device.version());
+        eprintln!("[XR50] Features: {:?}", device.features());
 
-        // Throttle WebSocket broadcast to ~60 Hz (browser can't use more)
-        if now.duration_since(last_broadcast) >= broadcast_interval {
-            last_broadcast = now;
+        let stream = match device.start_slam(xvisio::SlamMode::Edge) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[XR50] Failed to start SLAM: {}", e);
+                eprintln!("[XR50] Retrying in 1s...");
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
+            }
+        };
 
-            let p = &sample.pose;
-            let json = format!(
-                "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{}}}",
-                p.translation[0],
-                p.translation[1],
-                p.translation[2],
-                p.euler_deg[0],
-                p.euler_deg[1],
-                p.euler_deg[2],
-                p.timestamp_us,
-            );
+        eprintln!("[XR50] Streaming SLAM data to WebSocket clients...");
 
-            let msg = Message::Text(json);
-            let mut list = clients.lock().unwrap();
-            list.retain(|ws_arc| {
-                let mut ws = ws_arc.lock().unwrap();
-                ws.send(msg.clone()).is_ok()
-            });
-            drop(list);
-            ws_sent += 1;
+        let mut count: u64 = 0;
+        let mut ws_sent: u64 = 0;
+        let mut last_report = std::time::Instant::now();
+        let mut last_broadcast = std::time::Instant::now();
+        let broadcast_interval = Duration::from_millis(16); // ~60 Hz to browser
+
+        while running.load(Ordering::Relaxed) {
+            let sample = match stream.recv_timeout(Duration::from_secs(2)) {
+                Ok(s) => s,
+                Err(xvisio::XvisioError::Timeout) => continue,
+                Err(e) => {
+                    eprintln!("[XR50] Stream stopped: {}", e);
+                    break;
+                }
+            };
+
+            count += 1;
+            let now = std::time::Instant::now();
+
+            // Throttle WebSocket broadcast to ~60 Hz (browser can't use more)
+            if now.duration_since(last_broadcast) >= broadcast_interval {
+                last_broadcast = now;
+
+                let p = &sample.pose;
+                let json = format!(
+                    "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{:.6},\"tu\":{}}}",
+                    p.translation[0],
+                    p.translation[1],
+                    p.translation[2],
+                    p.euler_deg[0],
+                    p.euler_deg[1],
+                    p.euler_deg[2],
+                    p.host_timestamp_s,
+                    p.timestamp_us,
+                );
+
+                let msg = Message::Text(json);
+                let mut sent = 0u64;
+                let mut list = clients.lock().unwrap();
+                list.retain(|ws_arc| {
+                    let mut ws = ws_arc.lock().unwrap();
+                    if ws.send(msg.clone()).is_ok() {
+                        sent += 1;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                drop(list);
+                ws_sent += sent;
+            }
+
+            // Report throughput every 5 seconds
+            if now.duration_since(last_report) >= Duration::from_secs(5) {
+                let clients_count = clients.lock().unwrap().len();
+                let elapsed = last_report.elapsed().as_secs_f64();
+                eprintln!(
+                    "[XR50] {} samples/s, {} client-msg/s, {} client(s)",
+                    (count as f64 / elapsed) as u32,
+                    (ws_sent as f64 / elapsed) as u32,
+                    clients_count
+                );
+                count = 0;
+                ws_sent = 0;
+                last_report = now;
+            }
         }
 
-        // Report throughput every 5 seconds
-        if now.duration_since(last_report) >= Duration::from_secs(5) {
-            let clients_count = clients.lock().unwrap().len();
-            let elapsed = last_report.elapsed().as_secs_f64();
-            eprintln!(
-                "[XR50] {} samples/s, {} ws/s, {} client(s)",
-                (count as f64 / elapsed) as u32,
-                (ws_sent as f64 / elapsed) as u32,
-                clients_count
-            );
-            count = 0;
-            ws_sent = 0;
-            last_report = now;
-        }
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 

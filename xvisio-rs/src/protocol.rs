@@ -241,8 +241,19 @@ fn rotation_parse_mode() -> RotationParseMode {
     })
 }
 
-/// XR50 packets are usually matrix-formatted at bytes [19..36].
-/// Keep a fallback for quaternion-formatted variants.
+/// Validate a quaternion parsed from packet bytes.
+/// XR50 wire quaternion should be close to unit length.
+fn is_plausible_quaternion(w: f64, x: f64, y: f64, z: f64) -> bool {
+    let norm = (w * w + x * x + y * y + z * z).sqrt();
+    w.abs() <= 1.5
+        && x.abs() <= 1.5
+        && y.abs() <= 1.5
+        && z.abs() <= 1.5
+        && (0.5..=1.5).contains(&norm)
+}
+
+/// XR50 packets normally store rotation as a 3x3 matrix at bytes [19..36].
+/// Keep quaternion parsing as a fallback for non-standard firmware.
 fn is_plausible_rotation_matrix(m: &[[f64; 3]; 3]) -> bool {
     let norm = |r: usize| m[r][0] * m[r][0] + m[r][1] * m[r][1] + m[r][2] * m[r][2];
     let dot = |a: usize, b: usize| m[a][0] * m[b][0] + m[a][1] * m[b][1] + m[a][2] * m[b][2];
@@ -277,9 +288,8 @@ pub fn rotation_to_euler(m: &[[f64; 3]; 3]) -> [f64; 3] {
 /// - `[1..2]`: 0xA2, 0x33 (command echo)
 /// - `[3..6]`: uint32 LE timestamp (microseconds)
 /// - `[7..18]`: 3x int32 LE translation (scaled by 2^-14)
-/// - `[19..36]`: rotation payload:
-///   - Common XR50 format: 9x int16 LE 3x3 rotation matrix (row-major)
-///   - Alternate format: quaternion [w, x, y, z] in first 8 bytes
+/// - `[19..36]`: 9x int16 LE 3x3 rotation matrix (scaled by 2^-14)
+/// - `[19..26]`: optional quaternion fallback for non-standard packets
 /// - `[37..62]`: extended data (IMU, confidence, padding)
 pub fn parse_slam_packet(data: &[u8], epoch: Instant) -> Option<SlamSample> {
     if data.len() < REPORT_SIZE {
@@ -317,13 +327,20 @@ pub fn parse_slam_packet(data: &[u8], epoch: Instant) -> Option<SlamSample> {
             (m, w, x, y, z)
         }
         RotationParseMode::Auto => {
-            // Rotation payload at bytes [19..36] is usually a 3x3 matrix in XR50 packets.
+            let quaternion_candidate = parse_quaternion();
             let matrix_candidate = parse_rotation_matrix(data);
             if is_plausible_rotation_matrix(&matrix_candidate) {
                 let [w, x, y, z] = rotation_to_quaternion(&matrix_candidate);
                 (matrix_candidate, w, x, y, z)
+            } else if is_plausible_quaternion(
+                quaternion_candidate.1,
+                quaternion_candidate.2,
+                quaternion_candidate.3,
+                quaternion_candidate.4,
+            ) {
+                quaternion_candidate
             } else {
-                parse_quaternion()
+                quaternion_candidate
             }
         }
     };
@@ -428,8 +445,13 @@ mod tests {
         assert!((sample.pose.translation[1] - 0.0018).abs() < 0.001);
         assert!((sample.pose.translation[2] - 0.0275).abs() < 0.001);
 
-        // Rotation matrix payload should be decoded and remain normalized.
+        // libxvisio stores bytes [19..36] as a 3x3 rotation matrix.
         assert!((sample.pose.rotation[0][0] - (-0.994)).abs() < 0.01);
+        assert!((sample.pose.rotation[1][1] - (-0.995)).abs() < 0.01);
+        assert!((sample.pose.rotation[2][2] - 0.991).abs() < 0.01);
+
+        // The SDK-facing quaternion is derived from that matrix.
+        assert!((sample.pose.quaternion[2] - 0.997).abs() < 0.01);
         let qn = (sample.pose.quaternion[0] * sample.pose.quaternion[0]
             + sample.pose.quaternion[1] * sample.pose.quaternion[1]
             + sample.pose.quaternion[2] * sample.pose.quaternion[2]

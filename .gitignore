@@ -50,5 +50,8 @@ UserSettings/
 *.log
 *.pid
 
+# Local tooling/cache artifacts
+.vcpkg-buildtrees/
+
 # misc
 project-esky-unity/
