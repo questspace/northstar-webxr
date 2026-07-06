@@ -2,27 +2,11 @@ import { useEffect, useRef } from 'react'
 import { useTrackingStore, type HandData, type HandJoint } from '../stores/tracking'
 
 const LEAP_WS_URL = 'ws://localhost:6437/v6.json'
-const LEAP_HTTP_URL = 'http://localhost:6437/v6.json'
 const HYPERION_WS_URL = 'ws://localhost:1024'
 const RECONNECT_DELAY = 2000
 
-const canReachLeap = async () => {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 800)
-  try {
-    await fetch(LEAP_HTTP_URL, {
-      mode: 'no-cors',
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-    return true
-  } catch {
-    return false
-  } finally {
-    window.clearTimeout(timeout)
-  }
-}
-
+// The v6 bridge (Ultraleap-Tracking-WS) is WebSocket-only and never answers
+// plain HTTP, so reachability must be probed with a WebSocket, not fetch().
 const canOpenWebSocket = (url: string) =>
   new Promise<boolean>((resolve) => {
     const ws = new WebSocket(url)
@@ -96,25 +80,24 @@ export const useUltraleap = (enabled = true) => {
     let reconnectTimer: ReturnType<typeof setTimeout>
     let alive = true
 
-    const connect = async () => {
+    const retry = async () => {
+      const store = useTrackingStore.getState()
+      store.setLeapConnected(false)
+      store.setHands(null, null)
+      const hyperionRunning = await canOpenWebSocket(HYPERION_WS_URL)
+      store.setLeapStatus(
+        hyperionRunning
+          ? 'Ultraleap v6 bridge not running on localhost:6437 (Hyperion detected on 1024; start Ultraleap-Tracking-WS)'
+          : 'Ultraleap websocket not running on localhost:6437',
+      )
+      if (alive) reconnectTimer = setTimeout(connect, RECONNECT_DELAY)
+    }
+
+    const connect = () => {
       if (!alive) return
       const store = useTrackingStore.getState()
-      store.setLeapStatus('Checking Ultraleap websocket on localhost:6437')
+      store.setLeapStatus('Connecting to Ultraleap websocket on localhost:6437')
 
-      if (!(await canReachLeap())) {
-        store.setLeapConnected(false)
-        store.setHands(null, null)
-        const hyperionRunning = await canOpenWebSocket(HYPERION_WS_URL)
-        store.setLeapStatus(
-          hyperionRunning
-            ? 'Hyperion websocket detected on localhost:1024; v6 JSON bridge is not running on localhost:6437'
-            : 'Ultraleap websocket not running on localhost:6437',
-        )
-        reconnectTimer = setTimeout(connect, RECONNECT_DELAY)
-        return
-      }
-
-      store.setLeapStatus('Connecting to Ultraleap websocket')
       const ws = new WebSocket(LEAP_WS_URL)
       wsRef.current = ws
 
@@ -157,10 +140,7 @@ export const useUltraleap = (enabled = true) => {
       }
 
       ws.onclose = () => {
-        const next = useTrackingStore.getState()
-        next.setLeapConnected(false)
-        next.setLeapStatus('Ultraleap disconnected')
-        if (alive) reconnectTimer = setTimeout(connect, RECONNECT_DELAY)
+        void retry()
       }
 
       ws.onerror = () => ws.close()
