@@ -11,9 +11,6 @@ target/
 **/target/
 Cargo.lock
 
-# Ultraleap WebSocket server (cloned repo)
-ultraleap-websocket/
-
 # CMake
 CMakeCache.txt
 CMakeFiles/
