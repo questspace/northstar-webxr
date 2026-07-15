@@ -5,6 +5,9 @@ import { createPoseFilter } from '../lib/one-euro-filter'
 const XR50_WS_URL = 'ws://localhost:8080'
 const XR50_HTTP_URL = 'http://localhost:8080'
 const RECONNECT_DELAY = 2000
+// A socket can stay open yet stop delivering poses (SLAM stall upstream).
+// If no message arrives within this window, force a reconnect.
+const STALL_TIMEOUT = 2500
 
 const canReachBridge = async () => {
   const controller = new AbortController()
@@ -48,7 +51,9 @@ export const useXR50 = (enabled = true) => {
     if (!enabled) return
 
     let reconnectTimer: ReturnType<typeof setTimeout>
+    let stallTimer: ReturnType<typeof setTimeout>
     let alive = true
+    let stalled = false
 
     const connect = async () => {
       if (!alive) return
@@ -66,13 +71,34 @@ export const useXR50 = (enabled = true) => {
       const ws = new WebSocket(XR50_WS_URL)
       wsRef.current = ws
 
+      // Reset the stall watchdog on every frame; if it ever fires, the stream
+      // has gone silent, so drop the socket to trigger a fresh reconnect.
+      const armWatchdog = () => {
+        clearTimeout(stallTimer)
+        stallTimer = setTimeout(() => {
+          stalled = true
+          const s = useTrackingStore.getState()
+          s.setXR50Stalled(true)
+          s.setXR50Status('XR50 stream stalled - reconnecting')
+          ws.close()
+        }, STALL_TIMEOUT)
+      }
+
       ws.onopen = () => {
         const next = useTrackingStore.getState()
         next.setXR50Connected(true)
+        next.setXR50Stalled(false)
+        stalled = false
         next.setXR50Status('XR50 connected')
+        armWatchdog()
       }
 
       ws.onmessage = (e) => {
+        armWatchdog()
+        if (stalled) {
+          stalled = false
+          useTrackingStore.getState().setXR50Stalled(false)
+        }
         try {
           const raw = JSON.parse(e.data) as {
             x: number; y: number; z: number
@@ -100,9 +126,10 @@ export const useXR50 = (enabled = true) => {
       }
 
       ws.onclose = () => {
+        clearTimeout(stallTimer)
         const next = useTrackingStore.getState()
         next.setXR50Connected(false)
-        next.setXR50Status('XR50 disconnected')
+        if (!stalled) next.setXR50Status('XR50 disconnected')
         if (alive) reconnectTimer = setTimeout(connect, RECONNECT_DELAY)
       }
 
@@ -114,8 +141,11 @@ export const useXR50 = (enabled = true) => {
     return () => {
       alive = false
       clearTimeout(reconnectTimer)
+      clearTimeout(stallTimer)
       wsRef.current?.close()
-      useTrackingStore.getState().setXR50Status('XR50 disabled')
+      const store = useTrackingStore.getState()
+      store.setXR50Stalled(false)
+      store.setXR50Status('XR50 disabled')
     }
   }, [enabled])
 }

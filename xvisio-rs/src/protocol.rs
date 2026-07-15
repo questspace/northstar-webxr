@@ -252,18 +252,28 @@ fn is_plausible_quaternion(w: f64, x: f64, y: f64, z: f64) -> bool {
         && (0.5..=1.5).contains(&norm)
 }
 
-/// XR50 packets normally store rotation as a 3x3 matrix at bytes [19..36].
-/// Keep quaternion parsing as a fallback for non-standard firmware.
+/// Some XR50 firmware stores rotation as a 3x3 matrix at bytes [19..36]; others
+/// (e.g. xr50 V1.09) store a quaternion at [19..26]. The same bytes decode as
+/// either, so auto-detection must be strict: a real rotation matrix has
+/// orthonormal rows AND determinant +1. Requiring the determinant is essential —
+/// without it, a quaternion firmware's bytes intermittently pass as a "matrix"
+/// (det ≈ 0.6), causing the parser to flip between two ~170°-apart orientations.
 fn is_plausible_rotation_matrix(m: &[[f64; 3]; 3]) -> bool {
     let norm = |r: usize| m[r][0] * m[r][0] + m[r][1] * m[r][1] + m[r][2] * m[r][2];
     let dot = |a: usize, b: usize| m[a][0] * m[b][0] + m[a][1] * m[b][1] + m[a][2] * m[b][2];
-    let n0 = norm(0);
-    let n1 = norm(1);
-    let n2 = norm(2);
-    if !(0.5..=1.5).contains(&n0) || !(0.5..=1.5).contains(&n1) || !(0.5..=1.5).contains(&n2) {
+    if !(0.8..=1.2).contains(&norm(0))
+        || !(0.8..=1.2).contains(&norm(1))
+        || !(0.8..=1.2).contains(&norm(2))
+    {
         return false;
     }
-    dot(0, 1).abs() < 0.7 && dot(0, 2).abs() < 0.7 && dot(1, 2).abs() < 0.7
+    if dot(0, 1).abs() >= 0.3 || dot(0, 2).abs() >= 0.3 || dot(1, 2).abs() >= 0.3 {
+        return false;
+    }
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    (0.85..=1.15).contains(&det)
 }
 
 /// Convert a 3x3 rotation matrix to Euler angles [roll, pitch, yaw] in degrees.

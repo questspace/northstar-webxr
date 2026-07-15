@@ -208,6 +208,11 @@ fn slam_loop(
     clients: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>>>,
     running: Arc<AtomicBool>,
 ) {
+    // Budget for reinitializing after a degraded USB re-enumeration before we
+    // give up and stream with the device as-is.
+    const MAX_DEGRADED_RETRIES: u32 = 6;
+    let mut degraded_retries = 0u32;
+
     while running.load(Ordering::Relaxed) {
         eprintln!("[XR50] Opening device...");
 
@@ -225,6 +230,27 @@ fn slam_loop(
         eprintln!("[XR50] Version:  {}", device.version());
         eprintln!("[XR50] Features: {:?}", device.features());
 
+        // A USB re-enumeration (e.g. after power/suspend) can hand back a device
+        // whose control queries return an empty identity / zero features. SLAM
+        // from that state streams stale poses, so reinitialize before using it.
+        if device.uuid().trim().is_empty() || device.features().is_empty() {
+            if degraded_retries < MAX_DEGRADED_RETRIES {
+                degraded_retries += 1;
+                eprintln!(
+                    "[XR50] Degraded open (empty identity/features) - reinitializing ({}/{})",
+                    degraded_retries, MAX_DEGRADED_RETRIES
+                );
+                drop(device);
+                std::thread::sleep(Duration::from_millis(750));
+                continue;
+            }
+            eprintln!(
+                "[XR50] Still degraded after {} retries - streaming as-is",
+                MAX_DEGRADED_RETRIES
+            );
+        }
+        degraded_retries = 0;
+
         let stream = match device.start_slam(xvisio::SlamMode::Edge) {
             Ok(s) => s,
             Err(e) => {
@@ -237,24 +263,99 @@ fn slam_loop(
 
         eprintln!("[XR50] Streaming SLAM data to WebSocket clients...");
 
+        // Optional pose diagnostics for investigating rotation glitches.
+        //   XR50_POSE_LOG=<path>  capture every sample as CSV
+        //   XR50_SPIKE_DEG=<deg>  per-sample angular-delta spike threshold (default 20)
+        // Enables spike detection on stderr and, if a path is set, a full CSV
+        // trace (raw quaternion + emitted euler + confidence + angular delta) so
+        // a data spike (large quat delta) can be told apart from an euler
+        // representation glitch (small quat delta, large euler jump).
+        let mut pose_log = std::env::var("XR50_POSE_LOG").ok().and_then(|p| {
+            match std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+                Ok(mut f) => {
+                    let _ = writeln!(
+                        f,
+                        "# host_s,dev_us,qx,qy,qz,qw,roll,pitch,yaw,conf,d_ang_deg,spike,det,normErr,ortho"
+                    );
+                    eprintln!("[XR50] Pose CSV logging to {}", p);
+                    Some(f)
+                }
+                Err(e) => {
+                    eprintln!("[XR50] pose log open failed ({}): {}", p, e);
+                    None
+                }
+            }
+        });
+        let spike_threshold_deg: f64 = std::env::var("XR50_SPIKE_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20.0);
+        let diagnostics = pose_log.is_some() || std::env::var("XR50_SPIKE_DEG").is_ok();
+        let mut prev_quat: Option<[f64; 4]> = None;
+
         let mut count: u64 = 0;
         let mut ws_sent: u64 = 0;
         let mut last_report = std::time::Instant::now();
         let mut last_broadcast = std::time::Instant::now();
+        let mut last_sample = std::time::Instant::now();
         let broadcast_interval = Duration::from_millis(16); // ~60 Hz to browser
+        // Edge-SLAM stops emitting poses when it loses its lock (e.g. the headset
+        // sits idle with no visual parallax). Reinitialize instead of spinning on
+        // timeouts forever, so the stream recovers on its own once moved again.
+        let stall_timeout = Duration::from_secs(4);
 
         while running.load(Ordering::Relaxed) {
-            let sample = match stream.recv_timeout(Duration::from_secs(2)) {
+            let sample = match stream.recv_timeout(Duration::from_millis(500)) {
                 Ok(s) => s,
-                Err(xvisio::XvisioError::Timeout) => continue,
+                Err(xvisio::XvisioError::Timeout) => {
+                    if last_sample.elapsed() >= stall_timeout {
+                        eprintln!(
+                            "[XR50] No pose for {}s - SLAM stalled, reinitializing...",
+                            stall_timeout.as_secs()
+                        );
+                        break;
+                    }
+                    continue;
+                }
                 Err(e) => {
                     eprintln!("[XR50] Stream stopped: {}", e);
                     break;
                 }
             };
 
+            last_sample = std::time::Instant::now();
             count += 1;
             let now = std::time::Instant::now();
+
+            // Per-sample rotation diagnostics (runs at full sample rate so a
+            // single-frame spike can't be hidden by the 60 Hz broadcast throttle).
+            if diagnostics {
+                let p = &sample.pose;
+                let q = p.quaternion;
+                let d_ang = prev_quat.map(|prev| quat_angle_deg(prev, q)).unwrap_or(0.0);
+                prev_quat = Some(q);
+                let spike = d_ang >= spike_threshold_deg;
+                if let Some(f) = pose_log.as_mut() {
+                    let e = p.euler_deg;
+                    let (det, norm_err, ortho) = matrix_validity(&p.rotation);
+                    let _ = writeln!(
+                        f,
+                        "{:.6},{},{:.5},{:.5},{:.5},{:.5},{:.2},{:.2},{:.2},{:.4},{:.2},{},{:.4},{:.4},{:.4}",
+                        p.host_timestamp_s, p.timestamp_us,
+                        q[0], q[1], q[2], q[3],
+                        e[0], e[1], e[2],
+                        p.confidence, d_ang, spike as u8,
+                        det, norm_err, ortho,
+                    );
+                }
+                if spike {
+                    let e = p.euler_deg;
+                    eprintln!(
+                        "[XR50] SPIKE d{:.1}deg conf={:.3} euler=({:.1},{:.1},{:.1}) quat=({:.3},{:.3},{:.3},{:.3})",
+                        d_ang, p.confidence, e[0], e[1], e[2], q[0], q[1], q[2], q[3],
+                    );
+                }
+            }
 
             // Throttle WebSocket broadcast to ~60 Hz (browser can't use more)
             if now.duration_since(last_broadcast) >= broadcast_interval {
@@ -307,6 +408,40 @@ fn slam_loop(
 
         std::thread::sleep(Duration::from_secs(1));
     }
+}
+
+/// Angular difference (degrees) between two quaternions [qx, qy, qz, qw].
+/// Normalizes both first so a non-unit wire quaternion can't inflate the angle.
+fn quat_angle_deg(a: [f64; 4], b: [f64; 4]) -> f64 {
+    let na = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2] + a[3] * a[3]).sqrt();
+    let nb = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2] + b[3] * b[3]).sqrt();
+    if na == 0.0 || nb == 0.0 {
+        return 0.0;
+    }
+    let dot = ((a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]) / (na * nb))
+        .abs()
+        .clamp(0.0, 1.0);
+    (2.0 * dot.acos()).to_degrees()
+}
+
+/// Rotation-matrix validity metrics: (determinant, max row-norm error, max
+/// off-diagonal row dot). A true rotation matrix has det≈+1, row norms≈1
+/// (error≈0), and orthogonal rows (dots≈0).
+fn matrix_validity(m: &[[f64; 3]; 3]) -> (f64, f64, f64) {
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    let row_norm = |r: usize| (m[r][0] * m[r][0] + m[r][1] * m[r][1] + m[r][2] * m[r][2]).sqrt();
+    let dot = |a: usize, b: usize| m[a][0] * m[b][0] + m[a][1] * m[b][1] + m[a][2] * m[b][2];
+    let norm_err = [row_norm(0), row_norm(1), row_norm(2)]
+        .iter()
+        .map(|n| (n - 1.0).abs())
+        .fold(0.0_f64, f64::max);
+    let ortho = [dot(0, 1), dot(0, 2), dot(1, 2)]
+        .iter()
+        .map(|d| d.abs())
+        .fold(0.0_f64, f64::max);
+    (det, norm_err, ortho)
 }
 
 /// Find the visual-test/dist/ directory.

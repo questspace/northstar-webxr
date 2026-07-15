@@ -34,6 +34,12 @@ function Write-Tagged([string]$Name, [string]$Message) {
 }
 
 # The Ultraleap v6 bridge needs the tracking service running to get frames.
+# KNOWN ISSUE: Windows USB selective suspend can eject the Leap on sleep/resume,
+# after which the UltraleapTracking service stops itself and stays down (bridge
+# then logs "0 frames/s" / no hands in app). See README "Known Issue: sensors
+# die after PC sleep". Starting the service needs elevation; if this warns,
+# start it from an admin shell (Start-Service UltraleapTracking) and re-run.
+# A future watchdog could auto-restart the service+bridge here.
 if (-not $NoLeap) {
     $svc = Get-Service -Name 'UltraleapTracking' -ErrorAction SilentlyContinue
     if ($svc -and $svc.Status -ne 'Running') {

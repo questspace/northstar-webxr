@@ -24,6 +24,7 @@ export interface HandData {
 interface TrackingState {
   // Connection states
   xr50Connected: boolean
+  xr50Stalled: boolean
   leapConnected: boolean
   xr50Status: string
   leapStatus: string
@@ -41,6 +42,7 @@ interface TrackingState {
 
   // Actions
   setXR50Connected: (connected: boolean) => void
+  setXR50Stalled: (stalled: boolean) => void
   setLeapConnected: (connected: boolean) => void
   setXR50Status: (status: string) => void
   setLeapStatus: (status: string) => void
@@ -52,6 +54,7 @@ interface TrackingState {
 
 export const useTrackingStore = create<TrackingState>()((set) => ({
   xr50Connected: false,
+  xr50Stalled: false,
   leapConnected: false,
   xr50Status: 'Waiting for XR50 bridge on localhost:8080',
   leapStatus: 'Waiting for Ultraleap websocket on localhost:6437',
@@ -62,6 +65,7 @@ export const useTrackingStore = create<TrackingState>()((set) => ({
   leapFps: 0,
 
   setXR50Connected: (connected) => set({ xr50Connected: connected }),
+  setXR50Stalled: (stalled) => set({ xr50Stalled: stalled }),
   setLeapConnected: (connected) => set({ leapConnected: connected }),
   setXR50Status: (status) => set({ xr50Status: status }),
   setLeapStatus: (status) => set({ leapStatus: status }),

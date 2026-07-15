@@ -29,3 +29,44 @@ See `xvisio-rs/SETUP.md` for the detailed status and commands.
 - `xvisio-rs/` — active cross-platform XR50 SDK work.
 - `visual-test/` — frontend visualizations.
 - `MACOS_FIXES.md` — archived macOS investigation notes and findings.
+
+## Known Issue: sensors die after PC sleep (USB selective suspend)
+
+**Symptom.** After the machine sleeps/resumes (or after long idle), one or both
+sensors silently stop feeding the app:
+
+- **Ultraleap:** app shows connected (green) but no hands; the bridge logs
+  `0 frames/s`. Ultraleap's own log (`C:\ProgramData\Ultraleap\HandTracker\Logs\tracker_log.txt`)
+  shows `Broken device detected, missing frame data` → `Ejecting device` →
+  `Power Management - System Resuming` → `Stopping Server`. The
+  `UltraleapTracking` service shuts itself down on the broken-device event and
+  does **not** come back up on its own.
+- **XR50:** pose stops updating; the bridge re-opens the device in a degraded
+  state (empty UUID/features) after the USB re-enumeration.
+
+**Root cause.** Windows **USB selective suspend** powers down the sensor USB
+ports during sleep/idle. On resume the devices re-enumerate, which the drivers
+treat as a hard disconnect. This is the shared root cause for *both* sensors.
+
+**Manual recovery (current workaround).**
+1. Ultraleap: start the service from an **admin** shell —
+   `Start-Service UltraleapTracking` (or `services.msc` → *Ultraleap Tracking
+   Service* → Start). Then restart the v6 bridge so it makes a fresh LeapC
+   connection (re-run `start-all.ps1`, or restart just the bridge process).
+2. XR50: the bridge already self-heals (see `xvisio-rs/examples/server.rs`
+   degraded-device re-init) and the frontend has a stall watchdog
+   (`visual-test/src/hooks/useXR50.ts`).
+
+**Potential fixes (not yet implemented).**
+- **Prevent it:** disable USB selective suspend for the Leap + XR50 ports (or
+  globally on this dev box). Device Manager → each USB Root Hub → *Power
+  Management* → uncheck "Allow the computer to turn off this device", **or**
+  Control Panel → Power Options → advanced → *USB settings → USB selective
+  suspend setting → Disabled*. A per-device driver flag
+  (`Set-PnpDeviceProperty` on `DEVPKEY_..._SelectiveSuspendEnabled`) is also
+  possible but hardware-specific.
+- **Recover automatically:** add a lightweight watchdog to `start-all.ps1` that,
+  if `UltraleapTracking` is `Stopped` (or the bridge logs `0 frames/s` for a few
+  seconds), restarts the service + bridge — mirroring the XR50 self-healing that
+  already exists. Note the service restart needs elevation (one UAC prompt, or
+  run `start-all.ps1` from an admin shell).

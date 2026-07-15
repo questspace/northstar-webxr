@@ -2,6 +2,7 @@ import { useTrackingStore } from '../stores/tracking'
 
 export function HUD() {
   const xr50 = useTrackingStore((s) => s.xr50Connected)
+  const xr50Stalled = useTrackingStore((s) => s.xr50Stalled)
   const leap = useTrackingStore((s) => s.leapConnected)
   const pose = useTrackingStore((s) => s.headPose)
   const xr50Fps = useTrackingStore((s) => s.xr50Fps)
@@ -33,7 +34,8 @@ export function HUD() {
 
       <Indicator
         on={xr50}
-        label={`XR50 6DOF ${xr50 ? `(${xr50Fps} Hz)` : ''}`}
+        warn={xr50Stalled}
+        label={`XR50 6DOF ${xr50 && !xr50Stalled ? `(${xr50Fps} Hz)` : ''}`}
         status={xr50Status}
       />
       <Indicator
@@ -64,7 +66,8 @@ export function HUD() {
   )
 }
 
-function Indicator({ on, label, status }: { on: boolean; label: string; status: string }) {
+function Indicator({ on, label, status, warn = false }: { on: boolean; label: string; status: string; warn?: boolean }) {
+  const color = warn ? '#ffb020' : on ? '#00ff88' : '#ff4444'
   return (
     <div style={{ marginBottom: 7 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -73,12 +76,12 @@ function Indicator({ on, label, status }: { on: boolean; label: string; status: 
           height: 8,
           flexShrink: 0,
           borderRadius: '50%',
-          background: on ? '#00ff88' : '#ff4444',
-          boxShadow: on ? '0 0 8px #00ff88' : 'none',
+          background: color,
+          boxShadow: warn || on ? `0 0 8px ${color}` : 'none',
         }} />
         <span>{label}</span>
       </div>
-      {!on && (
+      {(!on || warn) && (
         <div style={{ marginLeft: 16, color: '#888', fontSize: 10 }}>
           {status}
         </div>
