@@ -2,9 +2,19 @@ use crate::protocol;
 use crate::types::SlamSample;
 use crate::{Result, XvisioError};
 use crossbeam_channel::{Receiver, Sender};
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+fn debug_file(message: &str) {
+    let Ok(path) = std::env::var("XVISIO_DEBUG_FILE") else {
+        return;
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", message);
+    }
+}
 
 /// Handle to an active SLAM data stream.
 ///
@@ -129,6 +139,8 @@ fn slam_reader_hidapi(
     let mut debug_packets: u32 = 0;
 
     log::info!("SLAM reader started (hidapi)");
+    debug_file("slam_reader_hidapi: started");
+    let mut read_timeouts = 0u32;
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -137,17 +149,44 @@ fn slam_reader_hidapi(
         }
 
         let len = match device.read_timeout(&mut buf, 100) {
-            Ok(0) => continue,
+            Ok(0) => {
+                read_timeouts += 1;
+                if read_timeouts <= 10 || read_timeouts % 50 == 0 {
+                    debug_file(&format!("slam_reader_hidapi: timeout {}", read_timeouts));
+                }
+                continue;
+            }
             Ok(n) => n,
             Err(e) => {
                 log::warn!("SLAM read error: {}", e);
+                debug_file(&format!("slam_reader_hidapi: read error {}", e));
+                if e.to_string().to_ascii_lowercase().contains("not connected") {
+                    stop_flag.store(true, Ordering::Relaxed);
+                    break;
+                }
                 continue;
             }
         };
+        read_timeouts = 0;
 
         let data: &[u8] = if len >= protocol::REPORT_SIZE && buf[0] == protocol::SLAM_HEADER[0] {
+            if debug_raw && debug_packets < 20 {
+                debug_file(&format!(
+                    "slam_reader_hidapi: packet len={} hdr={:02x} {:02x} {:02x}",
+                    len, buf[0], buf[1], buf[2]
+                ));
+            }
             &buf[..len]
         } else {
+            if debug_packets < 20 {
+                debug_file(&format!(
+                    "slam_reader_hidapi: unexpected len={} hdr={:02x} {:02x} {:02x}",
+                    len,
+                    buf[0],
+                    if len > 1 { buf[1] } else { 0 },
+                    if len > 2 { buf[2] } else { 0 },
+                ));
+            }
             if debug_raw && debug_packets < 20 {
                 debug_packets += 1;
                 let b0 = if len > 0 { buf[0] } else { 0 };

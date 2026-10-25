@@ -6,6 +6,7 @@
  * - Low speed → aggressive smoothing (removes jitter)
  * - High speed → minimal smoothing (preserves responsiveness)
  */
+import type { HeadPose, Quat, Vec3 } from '../stores/tracking'
 
 const smoothingFactor = (dt: number, cutoff: number) => {
   const r = 2 * Math.PI * cutoff * dt
@@ -55,28 +56,41 @@ export const createOneEuroFilter = (
   }
 }
 
-/** Bundle of 6 independent 1€ filters for a full 6DOF pose */
+/** Component-wise 1€ filter for a fixed-length vector */
+export const createVectorFilter = (
+  size: number,
+  minCutoff = 1.0,
+  beta = 0.007,
+  dCutoff = 1.0,
+) => {
+  const filters = Array.from({ length: size }, () => createOneEuroFilter(minCutoff, beta, dCutoff))
+  return (values: number[], timestamp: number) => values.map((v, i) => filters[i](v, timestamp))
+}
+
+/**
+ * 6DOF pose filter. Position and quaternion are filtered component-wise; the
+ * quaternion is kept on one hemisphere (q and -q are the same rotation) and
+ * renormalised, so there is no ±180° wrap as with Euler angles.
+ */
 export const createPoseFilter = (
   minCutoff = 1.0,
   beta = 0.007,
   dCutoff = 1.0,
 ) => {
-  const fx = createOneEuroFilter(minCutoff, beta, dCutoff)
-  const fy = createOneEuroFilter(minCutoff, beta, dCutoff)
-  const fz = createOneEuroFilter(minCutoff, beta, dCutoff)
-  const fRoll = createOneEuroFilter(minCutoff, beta, dCutoff)
-  const fPitch = createOneEuroFilter(minCutoff, beta, dCutoff)
-  const fYaw = createOneEuroFilter(minCutoff, beta, dCutoff)
+  const filterPosition = createVectorFilter(3, minCutoff, beta, dCutoff)
+  const filterQuaternion = createVectorFilter(4, minCutoff, beta, dCutoff)
+  let prevQ: Quat = [0, 0, 0, 1]
 
-  return (
-    pose: { x: number; y: number; z: number; roll: number; pitch: number; yaw: number },
-    timestamp: number,
-  ) => ({
-    x: fx(pose.x, timestamp),
-    y: fy(pose.y, timestamp),
-    z: fz(pose.z, timestamp),
-    roll: fRoll(pose.roll, timestamp),
-    pitch: fPitch(pose.pitch, timestamp),
-    yaw: fYaw(pose.yaw, timestamp),
-  })
+  return (pose: HeadPose, timestamp: number): HeadPose => {
+    const dot = pose.quaternion.reduce((sum, v, i) => sum + v * prevQ[i], 0)
+    const aligned = dot < 0 ? (pose.quaternion.map((v) => -v) as Quat) : pose.quaternion
+    const q = filterQuaternion(aligned, timestamp)
+    const norm = Math.hypot(...q) || 1
+    prevQ = q.map((v) => v / norm) as Quat
+    return {
+      ...pose,
+      position: filterPosition(pose.position, timestamp) as Vec3,
+      quaternion: prevQ,
+    }
+  }
 }

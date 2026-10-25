@@ -46,13 +46,14 @@ fn main() {
                 let p = &sample.pose;
                 let _ = writeln!(
                     out,
-                    "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{}}}",
+                    "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{:.6},\"tu\":{}}}",
                     p.translation[0],
                     p.translation[1],
                     p.translation[2],
                     p.euler_deg[0],
                     p.euler_deg[1],
                     p.euler_deg[2],
+                    p.host_timestamp_s,
                     p.timestamp_us,
                 );
                 let _ = out.flush();

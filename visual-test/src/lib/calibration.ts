@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 // ---- Raw JSON shape from EskySettings.json ----
+// Unity/Esky frame: X right, Y up, Z forward (left-handed).
 
 interface Vec3 { x: number; y: number; z: number }
 interface Vec4 { x: number; y: number; z: number; w: number }
@@ -19,7 +20,7 @@ interface EyeCalibJson {
   screenPosition: Vec3
   eyePosition: Vec3
   eyeRotation: Vec4
-  cameraProjection: Vec4 // x=left, y=right, z=bottom, w=top
+  cameraProjection: Vec4 // tangent half-angles: x=left, y=right, z=top, w=bottom (see parseEye)
   sphereToWorldSpace: Mat4Json
   worldToScreenSpace: Mat4Json
 }
@@ -52,14 +53,16 @@ interface EskySettingsJson {
 }
 
 // ---- Parsed calibration types ----
+// Everything below is in the Three.js head frame: X right, Y up, Z back (camera looks down -Z).
 
 export interface EyeCalibration {
   eyePosition: THREE.Vector3
   eyeRotation: THREE.Quaternion
   screenPosition: THREE.Vector3
   screenForward: THREE.Vector3
-  /** Asymmetric frustum: left, right, bottom, top (in tangent-space) */
+  /** Asymmetric frustum as tangent half-angles */
   frustum: { left: number; right: number; bottom: number; top: number }
+  /** Raw Unity-frame matrices, kept for the optics bench */
   worldToScreenSpace: THREE.Matrix4
   sphereToWorldSpace: THREE.Matrix4
   /** 16 polynomial coefficients for UV→rect X */
@@ -72,19 +75,21 @@ export interface EyeCalibration {
 export interface NorthStarCalibration {
   leftEye: EyeCalibration
   rightEye: EyeCalibration
-  /** Translation from eye center to Leap sensor (meters) */
+  /** Leap sensor pose in the head frame (sensor origin relative to eye center) */
   leapTranslation: THREE.Vector3
-  /** Rotation from eye space to Leap sensor space */
   leapRotation: THREE.Quaternion
-  /** Translation from tracker to display */
+  /** Head pose in the tracker (XR50) frame */
   trackerTranslation: THREE.Vector3
-  /** Rotation from tracker to display */
   trackerRotation: THREE.Quaternion
   /** Display dimensions */
   display: { width: number; height: number; eyeWidth: number; eyeHeight: number }
 }
 
 // ---- Parsing helpers ----
+
+/** Unity is left-handed with Z forward: mirror Z for points, negate x/y for rotations. */
+const unityVec3 = (v: Vec3) => new THREE.Vector3(v.x, v.y, -v.z)
+const unityQuat = (q: Vec4) => new THREE.Quaternion(-q.x, -q.y, q.z, q.w)
 
 const toMatrix4 = (m: Mat4Json): THREE.Matrix4 =>
   new THREE.Matrix4().set(
@@ -100,15 +105,18 @@ const parseEye = (
   uvY: number[],
   eyeOffset: number[],
 ): EyeCalibration => ({
-  eyePosition: new THREE.Vector3(eye.eyePosition.x, eye.eyePosition.y, eye.eyePosition.z),
-  eyeRotation: new THREE.Quaternion(eye.eyeRotation.x, eye.eyeRotation.y, eye.eyeRotation.z, eye.eyeRotation.w),
-  screenPosition: new THREE.Vector3(eye.screenPosition.x, eye.screenPosition.y, eye.screenPosition.z),
-  screenForward: new THREE.Vector3(eye.screenForward.x, eye.screenForward.y, eye.screenForward.z),
+  eyePosition: unityVec3(eye.eyePosition),
+  eyeRotation: unityQuat(eye.eyeRotation),
+  screenPosition: unityVec3(eye.screenPosition),
+  screenForward: unityVec3(eye.screenForward),
+  // Unity's ComposeProjection() (OpticalCalibrationManager.cs) builds the standard
+  // off-center projection with top = z (+0.3: little FOV above the eye line) and
+  // bottom = w (-1.4: most of the FOV below). Swapping them flips the eye image.
   frustum: {
     left: eye.cameraProjection.x,
     right: eye.cameraProjection.y,
-    bottom: eye.cameraProjection.z,
-    top: eye.cameraProjection.w,
+    top: eye.cameraProjection.z,
+    bottom: eye.cameraProjection.w,
   },
   worldToScreenSpace: toMatrix4(eye.worldToScreenSpace),
   sphereToWorldSpace: toMatrix4(eye.sphereToWorldSpace),
@@ -117,34 +125,19 @@ const parseEye = (
   eyeOffset: [eyeOffset[0] ?? 0, eyeOffset[1] ?? 0] as [number, number],
 })
 
+export const loadCalibration = async (url = '/calibration/EskySettings.json') =>
+  parseCalibration(await (await fetch(url)).json())
+
 export const parseCalibration = (json: EskySettingsJson): NorthStarCalibration => {
   const { v1CalibrationValues: v1, v2CalibrationValues: v2, myOffsets, displayWindowSettings: dw } = json
 
   return {
     leftEye: parseEye(v1.leftEye, v2.left_uv_to_rect_x, v2.left_uv_to_rect_y, v2.left_eye_offset),
     rightEye: parseEye(v1.rightEye, v2.right_uv_to_rect_x, v2.right_uv_to_rect_y, v2.right_eye_offset),
-    leapTranslation: new THREE.Vector3(
-      myOffsets.TranslationEyeToLeapMotion.x,
-      myOffsets.TranslationEyeToLeapMotion.y,
-      myOffsets.TranslationEyeToLeapMotion.z,
-    ),
-    leapRotation: new THREE.Quaternion(
-      myOffsets.RotationEyeToLeapMotion.x,
-      myOffsets.RotationEyeToLeapMotion.y,
-      myOffsets.RotationEyeToLeapMotion.z,
-      myOffsets.RotationEyeToLeapMotion.w,
-    ),
-    trackerTranslation: new THREE.Vector3(
-      myOffsets.TranslationFromTracker.x,
-      myOffsets.TranslationFromTracker.y,
-      myOffsets.TranslationFromTracker.z,
-    ),
-    trackerRotation: new THREE.Quaternion(
-      myOffsets.RotationFromTracker.x,
-      myOffsets.RotationFromTracker.y,
-      myOffsets.RotationFromTracker.z,
-      myOffsets.RotationFromTracker.w,
-    ),
+    leapTranslation: unityVec3(myOffsets.TranslationEyeToLeapMotion),
+    leapRotation: unityQuat(myOffsets.RotationEyeToLeapMotion),
+    trackerTranslation: unityVec3(myOffsets.TranslationFromTracker),
+    trackerRotation: unityQuat(myOffsets.RotationFromTracker),
     display: {
       width: dw.DisplayWidth,
       height: dw.DisplayHeight,

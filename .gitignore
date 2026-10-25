@@ -11,9 +11,6 @@ target/
 **/target/
 Cargo.lock
 
-# Ultraleap WebSocket server (cloned repo)
-ultraleap-websocket/
-
 # CMake
 CMakeCache.txt
 CMakeFiles/
@@ -49,6 +46,14 @@ UserSettings/
 # Logs & Debug
 *.log
 *.pid
+/logs/
+
+# Local tooling/cache artifacts
+.vcpkg-buildtrees/
 
 # misc
 project-esky-unity/
+# Vendored upstream repositories (cloned separately, not part of this tree)
+libxvisio-source/
+xvisio-sdk/
+xvisio-slam-driver/

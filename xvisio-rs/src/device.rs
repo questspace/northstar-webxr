@@ -4,6 +4,16 @@ use crate::slam::SlamStream;
 use crate::types::{DeviceInfo, Features, SlamMode};
 use crate::{Result, XvisioError};
 use hidapi::HidApi;
+use std::io::Write;
+
+fn debug_file(message: &str) {
+    let Ok(path) = std::env::var("XVISIO_DEBUG_FILE") else {
+        return;
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", message);
+    }
+}
 
 /// Check if a hidapi DeviceInfo matches the XR50 HID interface.
 /// Interface 3 on Windows/Linux, -1 on macOS IOKit (only HID interface on the device).
@@ -210,18 +220,42 @@ impl Device {
             return self.start_slam_hidapi_macos(edge, embedded_algo);
         }
 
+        let uvc_mode = Self::read_env_u8("XVISIO_UVC_MODE", 0);
+        let rotation_enabled = Self::read_env_bool("XVISIO_ROTATION_ENABLED", true);
+        let enable_stereo_init = Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
+
+        debug_file(&format!(
+            "start_slam_hidapi: begin uvcMode={} rotationEnabled={} stereoInit={}",
+            uvc_mode, rotation_enabled, enable_stereo_init
+        ));
         let hid = self
             .hid
             .as_ref()
             .ok_or_else(|| XvisioError::HidCommand("Device handle already consumed".into()))?;
 
-        hid.configure(edge, embedded_algo)?;
+        debug_file("start_slam_hidapi: configure");
+        hid.configure_with_uvc(edge, uvc_mode, embedded_algo)?;
+        debug_file("start_slam_hidapi: configure ok");
         std::thread::sleep(std::time::Duration::from_secs(1));
-        hid.edge_stream(edge)?;
+
+        if enable_stereo_init {
+            debug_file("start_slam_hidapi: stereo camera init");
+            hid.stereo_camera_init()?;
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            debug_file("start_slam_hidapi: stereo camera start");
+            hid.stereo_camera_start()?;
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+
+        debug_file("start_slam_hidapi: edge_stream");
+        hid.edge_stream_with_params(if edge { 1 } else { 0 }, rotation_enabled, false)?;
+        debug_file("start_slam_hidapi: edge_stream ok");
 
         // Open a second HID handle for the SLAM reader thread.
+        debug_file("start_slam_hidapi: open second handle");
         let api = create_hid_api()?;
         let slam_device = api.open_path(&self.device_path)?;
+        debug_file("start_slam_hidapi: second handle ok");
         SlamStream::start_hidapi(slam_device, api)
     }
 
