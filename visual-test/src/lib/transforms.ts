@@ -84,3 +84,18 @@ export const leapToHead = (calibration: NorthStarCalibration) => {
     direction: (dir: Vec3) => new THREE.Vector3().fromArray(dir).applyQuaternion(rotation),
   }
 }
+
+/** Inverse of `leapToHead`: head-frame points (m) and directions → Leap sensor frame (mm). */
+export const headToLeap = (calibration: NorthStarCalibration) => {
+  const s = useCalibrationProfilesStore.getState().settings
+  const rotation = degToQuat(s.handPitchOffset, s.handYawOffset, s.handRollOffset)
+    .multiply(calibration.leapRotation)
+    .multiply(LEAP_HMD_MOUNT)
+    .invert()
+  const offset = calibration.leapTranslation.clone()
+    .add(new THREE.Vector3(s.handOffsetX, s.handOffsetY, s.handOffsetZ))
+  return {
+    point: (p: THREE.Vector3) => p.clone().sub(offset).applyQuaternion(rotation).multiplyScalar(1000),
+    direction: (d: THREE.Vector3) => d.clone().applyQuaternion(rotation),
+  }
+}

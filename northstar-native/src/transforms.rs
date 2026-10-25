@@ -50,6 +50,8 @@ impl LeapToHead {
     }
 
     pub fn point(&self, mm: Vec3) -> Vec3 { self.rotation * (mm * 0.001) + self.offset }
+    /// A rotation expressed in the Leap frame → the same rotation in the head frame.
+    pub fn rotate(&self, q: Quat) -> Quat { self.rotation * q * self.rotation.inverse() }
 }
 
 /// Camera-space ray rotation taking the displayed pose back to the rendered one.

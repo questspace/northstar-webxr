@@ -3,7 +3,7 @@
 //! instant it was received, so the renderer can measure pose age at present time.
 use crate::leapc;
 use crate::transforms::{xr50_to_three, Pose};
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -17,9 +17,8 @@ pub struct HeadSample {
 #[derive(Clone, Debug)]
 pub struct HandSample {
     pub left: bool,
-    /// 0..1, for a future select gesture
-    #[allow(dead_code)]
-    pub pinch: f32,
+    /// Palm orientation in the Leap frame
+    pub palm_orientation: Quat,
     /// Leap frame, mm: palm then every bone joint (carp..tip per finger)
     pub joints: Vec<Vec3>,
 }
@@ -149,7 +148,8 @@ fn hand_sample(hand: &leapc::Hand) -> HandSample {
         joints.push(vec(digit.bones[0].prev_joint));
         joints.extend(digit.bones.iter().map(|b| vec(b.next_joint)));
     }
-    HandSample { left: hand.hand_type == leapc::HAND_LEFT, pinch: hand.pinch_strength, joints }
+    let o = hand.palm.orientation;
+    HandSample { left: hand.hand_type == leapc::HAND_LEFT, palm_orientation: Quat::from_xyzw(o.x, o.y, o.z, o.w), joints }
 }
 
 /// Connects to the Ultraleap service and streams hands until the process exits.

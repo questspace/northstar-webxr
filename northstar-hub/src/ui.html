@@ -61,6 +61,7 @@
     <div class="actions">
       <button class="primary" onclick="act('native/start')">Native XR app</button>
       <button onclick="act('native/stop')">Close native</button>
+      <select id="page" onchange="act('kiosk/page/' + this.value)"></select>
       <button class="primary" onclick="act('kiosk/start')">WebXR page</button>
       <button onclick="act('kiosk/stop')">Close WebXR</button>
     </div>
@@ -101,6 +102,8 @@ async function refresh() {
   const names = { xr50: 'XR50 bridge (ws :8080)', leap: 'Leap bridge (ws :6437)', web: 'Vite dev server (:5173)', native: 'Native XR app', kiosk: 'WebXR on headset' };
   $('procs').innerHTML = Object.entries(names).map(([k, v]) => row(s.processes[k] ? 'ok' : '', v,
     `<button onclick="act('${k}/${s.processes[k] ? 'stop' : 'start'}')">${s.processes[k] ? 'stop' : 'start'}</button>`)).join('');
+  if (s.kioskPages && $('page').options.length !== s.kioskPages.length) $('page').innerHTML = s.kioskPages.map((p) => `<option value="${p}">${p}</option>`).join('');
+  if (document.activeElement !== $('page')) $('page').value = s.kioskPage;
   $('dev').textContent = `hot reload ${s.dev.native ? 'ON' : 'off'}${s.dev.building ? ' · building…' : ''}${s.dev.lastResult ? ' · ' + s.dev.lastResult : ''}`;
   $('logs').innerHTML = Object.entries(s.logs).filter(([, v]) => v).map(([k, v]) => `<div class="muted">${k}</div><pre>${v.replace(/</g, '&lt;')}</pre>`).join('');
 }

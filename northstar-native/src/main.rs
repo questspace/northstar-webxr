@@ -6,11 +6,14 @@
 //! By default the head pose comes from the XR50 WebSocket bridge (which stays the one
 //! owner of the sensor) at the full 950 Hz; `--xr50 direct` opens the device in-process.
 //!
-//! Keys: U toggles the warp, R the re-projection, X / Y flip the warp axes, Esc quits.
-//! Prints pose age at present and frame pacing once a second (compare with the
-//! `[XR] pose age` line the WebXR runtime logs in the browser console).
+//! Hands: pinch a cube to move and turn it, pinch it with both hands to scale it,
+//! press the floating buttons (warp, re-projection, reset) with a fingertip. The real
+//! hands occlude the holograms. Keys: U toggles the warp, R the re-projection, X / Y
+//! flip the warp axes, Esc quits. Prints pose age at present and frame pacing once a
+//! second (compare with the `[XR] pose age` line the WebXR runtime logs).
 mod calibration;
 mod crash;
+mod interact;
 mod leapc;
 mod render;
 mod tracking;
@@ -18,6 +21,7 @@ mod transforms;
 
 use calibration::Calibration;
 use glam::{Mat3, Quat, Vec3};
+use interact::{Action, Button, Interaction, Object};
 use render::{segment, transform, Instance, Kind, Renderer, WarpSettings};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -108,17 +112,17 @@ struct App {
     calibration: Calibration,
     tracking: Shared,
     leap_to_head: LeapToHead,
+    interaction: Interaction,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     warp: bool,
     reproject: bool,
     rect_sign: [f32; 2],
     stats: Stats,
-    start: Instant,
 }
 
-/// The same demo scene as the web app: grid, anchors at eye height, floating cubes.
-fn scene(t: f32) -> Vec<(Kind, Vec<Instance>)> {
+/// The static part of the demo scene: grid and anchors at eye height.
+fn scene() -> Vec<(Kind, Vec<Instance>)> {
     let grid: Vec<Instance> = (0..=40)
         .flat_map(|i| {
             let p = i as f32 * 0.5 - 10.0;
@@ -136,17 +140,29 @@ fn scene(t: f32) -> Vec<(Kind, Vec<Instance>)> {
         let d = Vec3::new(0.18, 0.18 * s, 0.0);
         segment(Vec3::new(0.0, 1.6, -1.0) - d, Vec3::new(0.0, 1.6, -1.0) + d, Vec3::ONE)
     });
-    let cubes = (0..20)
+    vec![(Kind::Line, grid.into_iter().chain(cross).collect()), (Kind::Sphere, anchors)]
+}
+
+/// Twenty cubes within reach, the same places the web app puts them.
+fn cubes() -> Vec<Object> {
+    (0..20)
         .map(|seed| {
             let s = seed as f32;
-            let speed = 0.005 + ((s * 7.31) % 1.0) * 0.02;
-            let angle = t * speed * 60.0;
-            let position = Vec3::new((s * 13.37) % 4.0 - 2.0, (s * 7.91) % 2.0 + 0.5, (s * 3.53) % 4.0 - 2.0);
-            let rotation = Quat::from_rotation_y(angle) * Quat::from_rotation_x(angle * 0.5);
-            Instance::new(transform(position, rotation, Vec3::splat(0.1)), Vec3::new(0.0, 1.0, 1.0), true)
+            Object {
+                position: Vec3::new((s * 13.37) % 4.0 - 2.0, (s * 7.91) % 2.0 + 0.5, (s * 3.53) % 4.0 - 2.0),
+                rotation: Quat::from_rotation_y(s * 0.7),
+                scale: 0.1,
+                color: Vec3::new(0.0, 1.0, 1.0),
+            }
         })
-        .collect();
-    vec![(Kind::Line, grid.into_iter().chain(cross).collect()), (Kind::Sphere, anchors), (Kind::Cube, cubes)]
+        .collect()
+}
+
+/// Warp, re-projection and reset buttons at chest height, facing the user.
+fn buttons() -> Vec<Button> {
+    [(-0.1, Vec3::new(0.17, 0.42, 0.69), Action::Warp), (0.0, Vec3::new(0.5, 0.35, 0.8), Action::Reproject), (0.1, Vec3::new(0.8, 0.25, 0.25), Action::Reset)]
+        .map(|(x, color, action)| Button::new(Vec3::new(x, 1.35, -0.6), color, action))
+        .into()
 }
 
 impl App {
@@ -157,35 +173,25 @@ impl App {
         }
     }
 
-    fn hands(&self, rig: glam::Mat4) -> Vec<Instance> {
-        self.tracking
-            .hands
-            .lock()
-            .unwrap()
-            .iter()
-            .flat_map(|hand| {
-                let color = if hand.left { Vec3::new(0.0, 1.0, 0.53) } else { Vec3::new(1.0, 0.4, 0.0) };
-                hand.joints
-                    .iter()
-                    .enumerate()
-                    .map(|(i, mm)| {
-                        let p = rig.transform_point3(self.leap_to_head.point(*mm));
-                        Instance::new(transform(p, Quat::IDENTITY, Vec3::splat(if i == 0 { 0.012 } else { 0.006 })), color, true)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
-
     fn render(&mut self) {
         let Some(mut renderer) = self.renderer.take() else { return };
         let mut received = None;
+        let mut actions = Vec::new();
+        let mut hand_count = 0;
         let presented = renderer.frame(|| {
             let (pose, at, _confidence) = self.head();
             received = at;
             let rig = rig(&pose);
-            let mut draws = scene(self.start.elapsed().as_secs_f32());
-            draws.push((Kind::Sphere, self.hands(rig)));
+            let samples = self.tracking.hands.lock().unwrap().clone();
+            let hands = interact::hands(&samples, &self.leap_to_head, rig);
+            hand_count = hands.iter().flatten().count();
+            actions = self.interaction.update(&hands);
+            let mut draws = self.interaction.draws(&hands, |a| match a {
+                Action::Warp => self.warp,
+                Action::Reproject => self.reproject,
+                Action::Reset => false,
+            });
+            draws.extend(scene());
             // Freshest pose for the warp: with ~1 ms pose age this is late latching.
             let display = self.head().0.rotation;
             let warp = WarpSettings {
@@ -196,16 +202,23 @@ impl App {
             (rig, draws, warp)
         });
         self.renderer = Some(renderer);
+        for action in actions {
+            log::info!("button: {action:?}");
+            match action {
+                Action::Warp => self.warp = !self.warp,
+                Action::Reproject => self.reproject = !self.reproject,
+                Action::Reset => self.interaction.objects = cubes(),
+            }
+        }
         if !presented {
             return;
         }
-        let hands = self.tracking.hands.lock().unwrap().len();
         let rate = *self.tracking.head_rate.lock().unwrap();
         let leap_frames = self.tracking.leap_frames.load(std::sync::atomic::Ordering::Relaxed);
         if self.stats.tick.is_none() {
             log::info!("first frame presented");
         }
-        self.stats.present(received, rate, hands, leap_frames);
+        self.stats.present(received, rate, hand_count, leap_frames);
     }
 }
 
@@ -314,6 +327,7 @@ fn main() {
         calibration,
         tracking,
         leap_to_head,
+        interaction: Interaction::new(cubes(), buttons()),
         window: None,
         renderer: None,
         warp: true,
@@ -321,7 +335,6 @@ fn main() {
         // Verified on the headset: a negative vertical sign puts the floor above the anchors.
         rect_sign: [1.0, 1.0],
         stats: Stats::default(),
-        start: Instant::now(),
     };
     EventLoop::new().expect("event loop").run_app(&mut app).expect("run");
 }

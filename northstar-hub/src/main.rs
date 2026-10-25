@@ -13,15 +13,25 @@ use processes::{Processes, Spec};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 const PORT: u16 = 9100;
+/// WebXR pages the kiosk can open on the headset: (name, path on the Vite server).
+const KIOSK_PAGES: &[(&str, &str)] = &[
+    ("headset", "/#headset"),
+    ("workbench", "/examples/workbench.html"),
+    ("menu", "/examples/menu.html"),
+    ("hands", "/examples/hands.html"),
+    ("cones", "/examples/cones.html"),
+];
 const UI: &str = include_str!("ui.html");
 
 struct Hub {
     procs: Processes,
     dev: Arc<watch::DevState>,
+    /// Which WebXR page the kiosk opens (a KIOSK_PAGES name)
+    page: Mutex<String>,
 }
 
 impl Hub {
@@ -79,7 +89,7 @@ impl Hub {
                         format!("--window-position={},{}", panel.x, panel.y),
                         format!("--window-size={},{}", panel.width, panel.height),
                         "--user-data-dir=".to_string() + &root.join("logs/kiosk-profile").to_string_lossy(),
-                        "http://localhost:5173/#headset".into(),
+                        format!("http://localhost:5173{}", KIOSK_PAGES.iter().find(|(n, _)| *n == self.page.lock().unwrap().as_str()).map_or("/#headset", |(_, p)| p)),
                     ],
                     cwd: root.to_path_buf(),
                 }
@@ -120,6 +130,8 @@ impl Hub {
             "usb": usb,
             "leapService": devices::leap_service_state(),
             "processes": processes,
+            "kioskPage": *self.page.lock().unwrap(),
+            "kioskPages": KIOSK_PAGES.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
             "dev": {
                 "native": self.dev.enabled.load(Ordering::Relaxed),
                 "building": self.dev.building.load(Ordering::Relaxed),
@@ -144,6 +156,10 @@ impl Hub {
             ["all", "stop"] => {
                 self.procs.stop_all();
                 Ok(json!({ "ok": true }))
+            }
+            ["kiosk", "page", page] if KIOSK_PAGES.iter().any(|(n, _)| n == page) => {
+                *self.page.lock().unwrap() = page.to_string();
+                Ok(json!({ "ok": true, "message": format!("WebXR page: {page}") }))
             }
             ["dev", "native", on] => {
                 self.dev.enabled.store(*on == "on", Ordering::Relaxed);
@@ -179,7 +195,7 @@ fn main() {
     let root = repo_root();
     log::info!("repo root: {}", root.display());
 
-    let hub = Arc::new(Hub { procs: Processes::new(root.clone()), dev: Arc::new(watch::DevState::default()) });
+    let hub = Arc::new(Hub { procs: Processes::new(root.clone()), dev: Arc::new(watch::DevState::default()), page: Mutex::new("headset".into()) });
 
     // Native hot reload: rebuild on source change, then relaunch on the headset.
     let relaunch = hub.clone();
