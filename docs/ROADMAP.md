@@ -12,26 +12,31 @@ this monorepo. The direction below is the reason the stack exists.
 - An agent (or a person) edits `visual-test/src` or `northstar-native/src` and sees the
   change in the headset within seconds, with the laptop screen untouched.
 
-## 2. Hands as the interface (next)
+## 2. Hands as the interface (built, to be checked on the head)
 
-- Hand occlusion is in: a depth-only hand mesh cuts holograms behind the real hand
-  (`Hands` occluder in the WebXR app). Finger interaction already works through WebXR
-  `select` events from the pinch (see `/examples/cones.html`).
-- Next: a hand-interactable 3D menu and grab/scale/rotate of objects, in both the
-  WebXR runtime (as a reusable interaction layer on top of `XRHand`) and native
-  (LeapC joints are already decoded).
-- Persistent object placement: anchors in the SLAM frame (IWER's persistent anchors)
-  and, for cross-restart persistence, XR50 CSLAM map save/load (`docs/WEBXR_PLAN.md`).
+- WebXR interaction layer (`visual-test/src/xr/interaction.ts`): pinch to grab (one hand
+  moves and turns, two hands scale), fingertip presses, slider grabs, hover; works on any
+  WebXR device with hands. UI kit on top (`ui.ts`): buttons, a palm-summoned menu,
+  sliders. Hand occluders from the joints (`hands.ts`). Demo: `/examples/menu.html`.
+- Native: the same grab / two-hand scale / press rules and depth-only occluders in
+  `northstar-native/src/interact.rs` (cubes to grab, warp / re-projection / reset buttons).
+- Persistent placement through WebXR anchors with persistent handles (`anchors.ts`):
+  objects return after a reload while the bridge keeps the SLAM frame alive. Across a
+  headset power cycle the frame restarts; XR50 CSLAM map save/load is still the fix
+  (`docs/WEBXR_PLAN.md`).
+- A mouse-driven synthetic hand (`?hand=mouse`) exercises all of it without the headset;
+  the interactions above were verified that way. What is left is wearing it.
 
-## 3. Seeing Spaces workbench
+## 3. Seeing Spaces workbench (built: `docs/WORKBENCH.md`)
 
 A simulated Physics-AI workbench after Bret Victor's *Seeing Spaces*
-(https://worrydream.com/SeeingSpaces/): the debugging tools he describes — seeing
-inside (every sensor and internal variable of a thing laid out around it), seeing
-across time (scrub, compare and replay histories), seeing across possibilities
-(parameter sweeps side by side) — as spatial, hand-manipulable instruments around the
-physical object, viewed through NorthStar. Built on the same runtime: each tool is a
-module that subscribes to a data stream and renders in the shared XR scene.
+(https://worrydream.com/SeeingSpaces/): a self-balancing robot on a bench with the
+debugging tools he describes as hand-operated instruments around it — seeing inside
+(every sensor and controller variable, placed where it lives), seeing across time
+(scrub the last ten seconds, pin and compare moments), seeing across possibilities
+(a Kp × Kd sweep of the last push you can touch). `/examples/workbench.html`; each
+instrument is a module reading the same frame record and history. Next: a learned policy
+in place of the PID, and real hardware streaming its telemetry into the same record.
 
 ## 4. QuestSpace pilot
 

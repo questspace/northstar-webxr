@@ -37,9 +37,11 @@ open http://localhost:9100. It keeps the headset display laid out (laptop primar
 to the right at native 2880×1600 @ 89 Hz, auto-corrected on plug), runs the tracking
 bridges, launches the native XR app or the WebXR page onto the headset, closes them,
 restarts the Ultraleap service / re-plugs the XR50 over USB, and hot-reloads the native
-app from `northstar-native/src`. WebXR hot-reloads through Vite. `start-all.ps1` is the
-older bridge-only launcher. Design notes: `docs/WEBXR_PLAN.md`, `docs/NATIVE_VS_WEBXR.md`,
-`docs/ROADMAP.md`.
+app from `northstar-native/src`. WebXR hot-reloads through Vite. The *WebXR page* selector
+picks what the kiosk opens on the headset: the headset scene, the Seeing Spaces workbench
+(`docs/WORKBENCH.md`), the hand menu demo, or the stock three.js examples. `start-all.ps1`
+is the older bridge-only launcher. Design notes: `docs/WEBXR_PLAN.md`,
+`docs/NATIVE_VS_WEBXR.md`, `docs/ROADMAP.md`.
 
 Disable USB selective suspend once (admin), or the headset's USB hub gets put to sleep
 mid-session and both trackers drop:

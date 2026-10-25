@@ -156,6 +156,7 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     scene_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    occluder_pipeline: wgpu::RenderPipeline,
     warp_pipeline: wgpu::RenderPipeline,
     camera_buffers: [wgpu::Buffer; 2],
     camera_groups: [wgpu::BindGroup; 2],
@@ -187,7 +188,13 @@ const VERTEX_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayou
 };
 
 /// Draw list for one frame: (mesh kind, instances).
-pub enum Kind { Cube, Sphere, Line }
+pub enum Kind {
+    Cube,
+    Sphere,
+    Line,
+    /// Depth only: cubes that cut holes for the real hands
+    Occluder,
+}
 
 impl Renderer {
     pub fn new(window: Arc<Window>, calibration: &Calibration, low_power: bool) -> Self {
@@ -281,7 +288,7 @@ impl Renderer {
             bind_group_layouts: &[&uniform_layout],
             push_constant_ranges: &[],
         });
-        let scene_pipeline_for = |topology: wgpu::PrimitiveTopology| {
+        let scene_pipeline_for = |topology: wgpu::PrimitiveTopology, write_mask: wgpu::ColorWrites| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: Some(&scene_layout),
@@ -295,7 +302,7 @@ impl Renderer {
                     module: &scene_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
-                    targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                    targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend: None, write_mask })],
                 }),
                 primitive: wgpu::PrimitiveState { topology, cull_mode: None, ..Default::default() },
                 depth_stencil: Some(wgpu::DepthStencilState {
@@ -310,8 +317,9 @@ impl Renderer {
                 cache: None,
             })
         };
-        let scene_pipeline = scene_pipeline_for(wgpu::PrimitiveTopology::TriangleList);
-        let line_pipeline = scene_pipeline_for(wgpu::PrimitiveTopology::LineList);
+        let scene_pipeline = scene_pipeline_for(wgpu::PrimitiveTopology::TriangleList, wgpu::ColorWrites::ALL);
+        let line_pipeline = scene_pipeline_for(wgpu::PrimitiveTopology::LineList, wgpu::ColorWrites::ALL);
+        let occluder_pipeline = scene_pipeline_for(wgpu::PrimitiveTopology::TriangleList, wgpu::ColorWrites::empty());
 
         let warp_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
@@ -430,6 +438,7 @@ impl Renderer {
             config,
             scene_pipeline,
             line_pipeline,
+            occluder_pipeline,
             warp_pipeline,
             camera_buffers,
             camera_groups,
@@ -511,6 +520,7 @@ impl Renderer {
                         Kind::Cube => (&self.cube, &self.scene_pipeline),
                         Kind::Sphere => (&self.sphere, &self.scene_pipeline),
                         Kind::Line => (&self.line, &self.line_pipeline),
+                        Kind::Occluder => (&self.cube, &self.occluder_pipeline),
                     };
                     let n = instances.len() as u32;
                     if first + n <= count as u32 {

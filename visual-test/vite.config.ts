@@ -31,6 +31,8 @@ export default defineConfig({
         calibration: resolve(__dirname, 'calibration.html'),
         cones: resolve(__dirname, 'examples/cones.html'),
         hands: resolve(__dirname, 'examples/hands.html'),
+        menu: resolve(__dirname, 'examples/menu.html'),
+        workbench: resolve(__dirname, 'examples/workbench.html'),
       },
     },
   },
