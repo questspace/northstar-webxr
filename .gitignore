@@ -53,3 +53,7 @@ UserSettings/
 
 # misc
 project-esky-unity/
+# Vendored upstream repositories (cloned separately, not part of this tree)
+libxvisio-source/
+xvisio-sdk/
+xvisio-slam-driver/

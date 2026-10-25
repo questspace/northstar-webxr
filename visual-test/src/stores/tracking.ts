@@ -1,24 +1,35 @@
 import { create } from 'zustand'
 
+export type Vec3 = [number, number, number]
+/** [qx, qy, qz, qw] */
+export type Quat = [number, number, number, number]
+
+/** Tracker pose in the Three.js world frame (meters, Y up, Z back). */
 export interface HeadPose {
-  x: number
-  y: number
-  z: number
-  roll: number
-  pitch: number
-  yaw: number
+  position: Vec3
+  quaternion: Quat
+  /** SLAM confidence [0..1]; 0 = IMU-only orientation, position is stale */
+  confidence: number
   timestamp: number
+  /** Wall-clock ms (Date.now() domain) when the sample left the tracker; for latency stats */
+  receivedAt: number
 }
 
-export interface HandJoint {
-  position: [number, number, number]
-}
-
+/** One tracked hand in the Leap sensor frame (mm). */
 export interface HandData {
   id: number
   type: 'left' | 'right'
-  palmPosition: [number, number, number]
-  fingers: HandJoint[][] // 5 fingers × 4 joints each (MCP, PIP, DIP, TIP)
+  palmPosition: Vec3
+  /** Unit vector out of the palm */
+  palmNormal: Vec3
+  /** Unit vector from palm to fingers */
+  direction: Vec3
+  wrist: Vec3
+  pinchStrength: number
+  /** thumb..pinky, each [carp, mcp, pip, dip, tip] */
+  fingers: Vec3[][]
+  /** finger widths in mm, thumb..pinky */
+  fingerWidth: number[]
 }
 
 interface TrackingState {
@@ -58,7 +69,7 @@ export const useTrackingStore = create<TrackingState>()((set) => ({
   leapConnected: false,
   xr50Status: 'Waiting for XR50 bridge on localhost:8080',
   leapStatus: 'Waiting for Ultraleap websocket on localhost:6437',
-  headPose: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0, timestamp: 0 },
+  headPose: { position: [0, 0, 0], quaternion: [0, 0, 0, 1], confidence: 0, timestamp: 0, receivedAt: 0 },
   leftHand: null,
   rightHand: null,
   xr50Fps: 0,

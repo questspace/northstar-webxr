@@ -30,6 +30,22 @@ See `xvisio-rs/SETUP.md` for the detailed status and commands.
 - `visual-test/` — frontend visualizations.
 - `MACOS_FIXES.md` — archived macOS investigation notes and findings.
 
+## NorthStar hub (start here)
+
+`northstar-hub` is the device manager: `cd northstar-hub && cargo run --release`, then
+open http://localhost:9100. It keeps the headset display laid out (laptop primary, panel
+to the right at native 2880×1600 @ 89 Hz, auto-corrected on plug), runs the tracking
+bridges, launches the native XR app or the WebXR page onto the headset, closes them,
+restarts the Ultraleap service / re-plugs the XR50 over USB, and hot-reloads the native
+app from `northstar-native/src`. WebXR hot-reloads through Vite. `start-all.ps1` is the
+older bridge-only launcher. Design notes: `docs/WEBXR_PLAN.md`, `docs/NATIVE_VS_WEBXR.md`,
+`docs/ROADMAP.md`.
+
+Disable USB selective suspend once (admin), or the headset's USB hub gets put to sleep
+mid-session and both trackers drop:
+`powercfg /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0`
+(and `/setdcvalueindex`), then `powercfg /setactive SCHEME_CURRENT`.
+
 ## Known Issue: sensors die after PC sleep (USB selective suspend)
 
 **Symptom.** After the machine sleeps/resumes (or after long idle), one or both

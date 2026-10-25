@@ -19,15 +19,17 @@ use tungstenite::Message;
 
 const PORT: u16 = 8080;
 
+/// WebSocket clients and whether each asked for every sample (`?rate=full`) rather
+/// than the display-rate throttle.
+type Clients = Arc<Mutex<Vec<(Arc<Mutex<tungstenite::WebSocket<TcpStream>>>, bool)>>>;
+
 fn main() {
     env_logger::init();
 
     let dist_dir = find_dist_dir();
     eprintln!("[HTTP] Serving static files from: {}", dist_dir.display());
 
-    // WebSocket clients shared across threads
-    type WsClient = Arc<Mutex<tungstenite::WebSocket<TcpStream>>>;
-    let clients: Arc<Mutex<Vec<WsClient>>> = Arc::new(Mutex::new(Vec::new()));
+    let clients: Clients = Arc::new(Mutex::new(Vec::new()));
 
     // Start XR50 SLAM thread
     let slam_clients = clients.clone();
@@ -77,11 +79,7 @@ fn main() {
 }
 
 /// Route incoming connection to WebSocket or HTTP handler.
-fn handle_connection(
-    stream: TcpStream,
-    clients: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>>>,
-    dist_dir: &Path,
-) {
+fn handle_connection(stream: TcpStream, clients: Clients, dist_dir: &Path) {
     // Set initial timeouts for HTTP; WebSocket handler overrides these
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
@@ -96,7 +94,7 @@ fn handle_connection(
     let request_str = String::from_utf8_lossy(&peek_buf[..n]);
 
     if request_str.contains("Upgrade: websocket") || request_str.contains("upgrade: websocket") {
-        handle_websocket(stream, clients);
+        handle_websocket(stream, clients, request_str.contains("rate=full"));
     } else {
         handle_http(stream, &request_str, dist_dir);
     }
@@ -106,10 +104,7 @@ fn handle_connection(
 ///
 /// The SLAM thread owns writes and removes stale clients on send failure.
 /// A read loop here would contend with the broadcaster and stall pose updates.
-fn handle_websocket(
-    stream: TcpStream,
-    clients: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>>>,
-) {
+fn handle_websocket(stream: TcpStream, clients: Clients, full_rate: bool) {
     // Keep dead clients from blocking the SLAM broadcaster.
     stream.set_write_timeout(Some(Duration::from_millis(50))).ok();
 
@@ -124,8 +119,8 @@ fn handle_websocket(
     let ws = Arc::new(Mutex::new(ws));
     {
         let mut list = clients.lock().unwrap();
-        list.push(ws.clone());
-        eprintln!("[WS] Client connected ({} total)", list.len());
+        list.push((ws.clone(), full_rate));
+        eprintln!("[WS] Client connected ({} total{})", list.len(), if full_rate { ", full rate" } else { "" });
     }
 }
 
@@ -204,14 +199,11 @@ fn handle_http(mut stream: TcpStream, request_str: &str, dist_dir: &Path) {
 }
 
 /// SLAM streaming loop — reads XR50 poses and broadcasts JSON to WebSocket clients.
-fn slam_loop(
-    clients: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>>>,
-    running: Arc<AtomicBool>,
-) {
-    // Budget for reinitializing after a degraded USB re-enumeration before we
-    // give up and stream with the device as-is.
-    const MAX_DEGRADED_RETRIES: u32 = 6;
-    let mut degraded_retries = 0u32;
+fn slam_loop(clients: Clients, running: Arc<AtomicBool>) {
+    // A USB re-enumeration (selective suspend, cable) can hand back a device whose
+    // control queries return an empty identity / zero features; SLAM from that
+    // state streams garbage, so keep reopening until it answers (a re-plug clears it).
+    let mut degraded_attempts = 0u32;
 
     while running.load(Ordering::Relaxed) {
         eprintln!("[XR50] Opening device...");
@@ -234,22 +226,18 @@ fn slam_loop(
         // whose control queries return an empty identity / zero features. SLAM
         // from that state streams stale poses, so reinitialize before using it.
         if device.uuid().trim().is_empty() || device.features().is_empty() {
-            if degraded_retries < MAX_DEGRADED_RETRIES {
-                degraded_retries += 1;
+            degraded_attempts += 1;
+            if degraded_attempts % 5 == 1 {
                 eprintln!(
-                    "[XR50] Degraded open (empty identity/features) - reinitializing ({}/{})",
-                    degraded_retries, MAX_DEGRADED_RETRIES
+                    "[XR50] Degraded open (empty identity/features) - waiting for the device to recover (attempt {}); re-plug the headset USB if this persists",
+                    degraded_attempts
                 );
-                drop(device);
-                std::thread::sleep(Duration::from_millis(750));
-                continue;
             }
-            eprintln!(
-                "[XR50] Still degraded after {} retries - streaming as-is",
-                MAX_DEGRADED_RETRIES
-            );
+            drop(device);
+            std::thread::sleep(Duration::from_millis(1500));
+            continue;
         }
-        degraded_retries = 0;
+        degraded_attempts = 0;
 
         let stream = match device.start_slam(xvisio::SlamMode::Edge) {
             Ok(s) => s,
@@ -298,7 +286,9 @@ fn slam_loop(
         let mut last_report = std::time::Instant::now();
         let mut last_broadcast = std::time::Instant::now();
         let mut last_sample = std::time::Instant::now();
-        let broadcast_interval = Duration::from_millis(16); // ~60 Hz to browser
+        // Matches the NorthStar panel's 120 Hz; the native pipeline showed each
+        // 8 ms of throttle shows up one-to-one as pose age at the warp pass.
+        let broadcast_interval = Duration::from_millis(8);
         // Edge-SLAM stops emitting poses when it loses its lock (e.g. the headset
         // sits idle with no visual parallax). Reinitialize instead of spinning on
         // timeouts forever, so the stream recovers on its own once moved again.
@@ -357,16 +347,32 @@ fn slam_loop(
                 }
             }
 
-            // Throttle WebSocket broadcast to ~60 Hz (browser can't use more)
-            if now.duration_since(last_broadcast) >= broadcast_interval {
-                last_broadcast = now;
+            // Display-rate throttle for browsers; full-rate clients get every sample.
+            let tick = now.duration_since(last_broadcast) >= broadcast_interval;
+            let any_full = clients.lock().unwrap().iter().any(|(_, full)| *full);
+            if tick || any_full {
+                if tick {
+                    last_broadcast = now;
+                }
 
+                // Raw XR50 pose in the device's own world frame (meters, [qx,qy,qz,qw]).
+                // Frame conversion is the client's job; Euler stays for the HUD/legacy readers.
+                // "tw" is wall-clock ms at broadcast so a browser on the same machine can
+                // measure pose age against Date.now() (same metric as the native pipeline).
                 let p = &sample.pose;
+                let q = &p.quaternion;
+                let wall_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64() * 1e3)
+                    .unwrap_or(0.0);
                 let json = format!(
-                    "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{:.6},\"tu\":{}}}",
+                    "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"q\":[{:.5},{:.5},{:.5},{:.5}],\"c\":{:.2},\"tw\":{:.3},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{:.6},\"tu\":{}}}",
                     p.translation[0],
                     p.translation[1],
                     p.translation[2],
+                    q[0], q[1], q[2], q[3],
+                    p.confidence,
+                    wall_ms,
                     p.euler_deg[0],
                     p.euler_deg[1],
                     p.euler_deg[2],
@@ -377,7 +383,10 @@ fn slam_loop(
                 let msg = Message::Text(json);
                 let mut sent = 0u64;
                 let mut list = clients.lock().unwrap();
-                list.retain(|ws_arc| {
+                list.retain(|(ws_arc, full)| {
+                    if !(*full || tick) {
+                        return true;
+                    }
                     let mut ws = ws_arc.lock().unwrap();
                     if ws.send(msg.clone()).is_ok() {
                         sent += 1;

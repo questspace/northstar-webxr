@@ -205,7 +205,14 @@ scale = 2^(-14) = 1/16384 = 6.103515625e-05
 
 ### Coordinate System
 
-- Translation is in meters, right-hand coordinate system (X=right, Y=up, Z=forward)
+- Translation is in meters, right-handed world frame in camera convention: X=right, **Y=down**, Z=forward
+  (measured: lifting the device decreases y, moving forward increases z)
+- The rotation is world←device. The device frame is rotated 180° about Z from the world frame
+  when the unit is level (rest quaternion ≈ `[qx,qy,qz,qw] = [0.05, 0.22, 0.97, -0.12]`), i.e. the
+  reported device axes are X=left, Y=up, Z=forward. Three.js conversion: position `(x, -y, -z)`,
+  rotation `Rx(180°) · R · Ry(180°)` (see `visual-test/src/lib/transforms.ts`)
+- While SLAM is lost (confidence 0) the translation saturates at ±131071.9999 m; the orientation
+  is still valid (IMU-only)
 - Quaternion wire order is **[w, x, y, z]** (bytes 19-26), confirmed by C++ `libxvisio/src/slam.cpp`
 - SDK convention stores as `[qx, qy, qz, qw]` (matching Android SDK `xv-types.h`)
 

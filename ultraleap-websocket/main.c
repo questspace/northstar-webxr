@@ -78,6 +78,9 @@ void* serviceMessageLoop(void* vargp) {
         switch (msg.type) {
             case eLeapEventType_Connection:
                 printf("Connected.\n");
+                // A hidden console is never the foreground app; without this policy the
+                // service only sends frames while we have focus (i.e. never).
+                LeapSetPolicyFlags(connectionHandle, eLeapPolicyFlag_BackgroundFrames, 0);
                 break;
             case eLeapEventType_Tracking:
                 handleTrackingEvent(msg.tracking_event);

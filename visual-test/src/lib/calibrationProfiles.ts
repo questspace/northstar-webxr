@@ -1,25 +1,27 @@
+/**
+ * Per-user tweaks layered on top of the EskySettings.json calibration.
+ * Offsets only: SLAM and Leap are metric, so there is nothing to "scale".
+ * Positions in meters (head frame), rotations in degrees.
+ */
 export interface CalibrationProfileSettings {
-  headScaleX: number
-  headScaleY: number
-  headScaleZ: number
   headOffsetX: number
   headOffsetY: number
   headOffsetZ: number
-  headRollScale: number
-  headPitchScale: number
-  headYawScale: number
   headRollOffset: number
   headPitchOffset: number
   headYawOffset: number
-  handScaleX: number
-  handScaleY: number
-  handScaleZ: number
   handOffsetX: number
   handOffsetY: number
   handOffsetZ: number
+  handRollOffset: number
+  handPitchOffset: number
+  handYawOffset: number
+  /** 0 = raw eye images side by side, 1 = full optical warp */
   distortionStrength: number
-  leftUvScale: number
-  rightUvScale: number
+  /** ±1: sense of the polynomial's horizontal / vertical ray axes (see xr/optics.ts) */
+  rectSignX: number
+  rectSignY: number
+  /** Esky "eye_offset": additive eye-texture UV shift per eye */
   leftUvOffsetX: number
   leftUvOffsetY: number
   rightUvOffsetX: number
@@ -34,27 +36,22 @@ export interface CalibrationProfileMeta {
 }
 
 export const defaultCalibrationSettings = (): CalibrationProfileSettings => ({
-  headScaleX: 1,
-  headScaleY: 1,
-  headScaleZ: 1,
   headOffsetX: 0,
   headOffsetY: 0,
   headOffsetZ: 0,
-  headRollScale: 1,
-  headPitchScale: 1,
-  headYawScale: 1,
   headRollOffset: 0,
   headPitchOffset: 0,
   headYawOffset: 0,
-  handScaleX: 1,
-  handScaleY: 1,
-  handScaleZ: 1,
   handOffsetX: 0,
   handOffsetY: 0,
   handOffsetZ: 0,
+  handRollOffset: 0,
+  handPitchOffset: 0,
+  handYawOffset: 0,
   distortionStrength: 1,
-  leftUvScale: 1,
-  rightUvScale: 1,
+  // Verified on the headset: -1 shows the floor above the eye-level anchors.
+  rectSignX: 1,
+  rectSignY: 1,
   leftUvOffsetX: 0,
   leftUvOffsetY: 0,
   rightUvOffsetX: 0,

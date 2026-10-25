@@ -1,4 +1,11 @@
-import { useTrackingStore } from '../stores/tracking'
+import * as THREE from 'three'
+import { useTrackingStore, type Quat } from '../stores/tracking'
+
+/** Quaternion → [pitch, yaw, roll] in degrees for display */
+const toEulerDeg = (q: Quat) => {
+  const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().fromArray(q), 'YXZ')
+  return [e.x, e.y, e.z].map((r) => THREE.MathUtils.radToDeg(r).toFixed(1))
+}
 
 export function HUD() {
   const xr50 = useTrackingStore((s) => s.xr50Connected)
@@ -46,8 +53,9 @@ export function HUD() {
 
       {xr50 && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-          <Row label="Pos" value={`${pose.x.toFixed(3)}, ${pose.y.toFixed(3)}, ${pose.z.toFixed(3)}`} />
-          <Row label="Rot" value={`${pose.roll.toFixed(1)} deg ${pose.pitch.toFixed(1)} deg ${pose.yaw.toFixed(1)} deg`} />
+          <Row label="Pos" value={pose.position.map((v) => v.toFixed(3)).join(', ')} />
+          <Row label="P/Y/R" value={`${toEulerDeg(pose.quaternion).join(' / ')} deg`} />
+          <Row label="Conf" value={pose.confidence.toFixed(2)} />
         </div>
       )}
 

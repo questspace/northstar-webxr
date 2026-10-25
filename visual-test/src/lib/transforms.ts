@@ -1,58 +1,86 @@
 import * as THREE from 'three'
 import { useCalibrationProfilesStore } from '../stores/calibrationProfiles'
+import type { NorthStarCalibration } from './calibration'
+import type { HeadPose, Quat, Vec3 } from '../stores/tracking'
 
 /**
- * Convert Leap Motion coordinates (mm) to head-relative scene coordinates (meters).
- * Leap on NorthStar points downward from the brow:
- *   Leap X → -Scene X (mirrored for handedness)
- *   Leap Y (up from device) → +Scene Z (forward from face)
- *   Leap Z (away from device) → -Scene Y (down from eyes)
+ * Frame conventions, checked against live XR50 data and on the headset
+ * (see PROTOCOL.md):
+ *  - XR50 device frame: X right, Y down, Z forward (camera convention).
+ *  - Its world frame sits 180° about Z from the device when the headset is level
+ *    (rest quaternion ≈ [0.05, 0.22, 0.97, -0.12]): X left, Y up, Z forward.
+ *    (The mirror reading — world Y down, device X left — fits the rest pose too,
+ *    but made the world turn with the head when worn.)
+ *  - Three.js world: X right, Y up, Z back; a camera looks down -Z.
  */
-export const leapToScene = (pos: [number, number, number]): THREE.Vector3 => {
-  const settings = useCalibrationProfilesStore.getState().settings
-  const scale = 0.001 // mm → meters
-  const base = new THREE.Vector3(
-    -pos[0] * scale,
-    -pos[2] * scale + 0.1,   // Leap Z → head Y (with offset for eye height)
-    pos[1] * scale + 0.3,    // Leap Y → head +Z (in front of face)
-  )
-  return new THREE.Vector3(
-    base.x * settings.handScaleX + settings.handOffsetX,
-    base.y * settings.handScaleY + settings.handOffsetY,
-    base.z * settings.handScaleZ + settings.handOffsetZ,
-  )
-}
+const XR50_WORLD_TO_THREE = new THREE.Quaternion(0, 1, 0, 0) // 180° about Y: (x, y, z) → (-x, y, -z)
+const XR50_DEVICE_TO_CAMERA = new THREE.Quaternion(1, 0, 0, 0) // 180° about X
 
-/**
- * Convert XR50 pose to scene-space position.
- * XR50 outputs meters; we add a default eye height of 1.6m.
- */
-export const xr50ToScene = (
-  x: number, y: number, z: number,
-  scale = 1.0,
-): THREE.Vector3 => {
-  const settings = useCalibrationProfilesStore.getState().settings
-  return new THREE.Vector3(
-    (x * scale) * settings.headScaleX + settings.headOffsetX,
-    ((y * scale) + 1.6) * settings.headScaleY + settings.headOffsetY,
-    (z * scale) * settings.headScaleZ + settings.headOffsetZ,
-  )
-}
+/** Height of the SLAM origin above the virtual floor. */
+const EYE_HEIGHT = 1.6
 
-/**
- * Convert XR50 Euler angles (degrees) to a Three.js Euler (radians, YXZ order).
- */
-export const xr50ToEuler = (
-  roll: number, pitch: number, yaw: number,
-): THREE.Euler => {
-  const settings = useCalibrationProfilesStore.getState().settings
-  const rollAdj = roll * settings.headRollScale + settings.headRollOffset
-  const pitchAdj = pitch * settings.headPitchScale + settings.headPitchOffset
-  const yawAdj = yaw * settings.headYawScale + settings.headYawOffset
-  return new THREE.Euler(
-    THREE.MathUtils.degToRad(pitchAdj),
-    THREE.MathUtils.degToRad(yawAdj),
-    THREE.MathUtils.degToRad(rollAdj),
+const degToQuat = (pitch: number, yaw: number, roll: number) =>
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    THREE.MathUtils.degToRad(pitch),
+    THREE.MathUtils.degToRad(yaw),
+    THREE.MathUtils.degToRad(roll),
     'YXZ',
-  )
+  ))
+
+/** Raw XR50 pose → tracker pose in the Three.js world frame. */
+export const xr50ToThree = (position: Vec3, quaternion: Quat) => {
+  const q = new THREE.Quaternion()
+    .copy(XR50_WORLD_TO_THREE)
+    .multiply(new THREE.Quaternion().fromArray(quaternion))
+    .multiply(XR50_DEVICE_TO_CAMERA)
+  return {
+    position: [-position[0], position[1], -position[2]] as Vec3,
+    quaternion: q.toArray() as Quat,
+  }
+}
+
+/**
+ * Tracker pose → camera rig pose: applies the tracker→head calibration, the
+ * user's head offsets and lifts the SLAM origin to eye height.
+ */
+export const headPoseToRig = (pose: HeadPose, calibration: NorthStarCalibration) => {
+  const s = useCalibrationProfilesStore.getState().settings
+  const tracker = new THREE.Quaternion().fromArray(pose.quaternion)
+  const quaternion = tracker.clone()
+    .multiply(calibration.trackerRotation)
+    .multiply(degToQuat(s.headPitchOffset, s.headYawOffset, s.headRollOffset))
+  const position = calibration.trackerTranslation.clone()
+    .applyQuaternion(tracker)
+    .add(new THREE.Vector3().fromArray(pose.position))
+    .add(new THREE.Vector3(s.headOffsetX, s.headOffsetY + EYE_HEIGHT, s.headOffsetZ))
+  return { position, quaternion }
+}
+
+/**
+ * Leap sensor frame → head frame for the HMD mount, measured on this NorthStar:
+ * hand right → Leap -X, hand up → Leap -Z, hand forward (away from the face) → Leap +Y.
+ * This is Ultraleap's standard HMD basis; the calibrated sensor tilt goes on top.
+ */
+const LEAP_HMD_MOUNT = new THREE.Quaternion().setFromRotationMatrix(
+  new THREE.Matrix4().set(
+    -1, 0, 0, 0,
+    0, 0, -1, 0,
+    0, -1, 0, 0,
+    0, 0, 0, 1,
+  ),
+)
+
+/** Builds the Leap → head frame transform for the current settings: points (mm → m) and directions. */
+export const leapToHead = (calibration: NorthStarCalibration) => {
+  const s = useCalibrationProfilesStore.getState().settings
+  const rotation = degToQuat(s.handPitchOffset, s.handYawOffset, s.handRollOffset)
+    .multiply(calibration.leapRotation)
+    .multiply(LEAP_HMD_MOUNT)
+  const offset = calibration.leapTranslation.clone()
+    .add(new THREE.Vector3(s.handOffsetX, s.handOffsetY, s.handOffsetZ))
+  return {
+    point: (posMm: Vec3) =>
+      new THREE.Vector3().fromArray(posMm).multiplyScalar(0.001).applyQuaternion(rotation).add(offset),
+    direction: (dir: Vec3) => new THREE.Vector3().fromArray(dir).applyQuaternion(rotation),
+  }
 }
