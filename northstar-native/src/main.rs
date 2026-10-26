@@ -46,6 +46,8 @@ struct Options {
     /// Render on the integrated GPU (use when the panel is wired to it)
     low_power: bool,
     calibration: String,
+    /// Panel rotation applied by Windows (the hub sets 180°); the swapchain ignores it, we compensate
+    panel_rotation: u32,
 }
 
 fn options() -> Options {
@@ -61,6 +63,7 @@ fn options() -> Options {
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         low_power: args.iter().any(|a| a == "--low-power"),
+        panel_rotation: value("--panel-rotation").and_then(|v| v.parse().ok()).unwrap_or(180),
         calibration: value("--calibration")
             .unwrap_or_else(|| "../visual-test/public/calibration/EskySettings.json".into()),
     }
@@ -196,6 +199,7 @@ impl App {
             let display = self.head().0.rotation;
             let warp = WarpSettings {
                 strength: if self.warp { 1.0 } else { 0.0 },
+                rotate: self.options.panel_rotation == 180 && !self.options.windowed,
                 rect_sign: self.rect_sign,
                 reproject: if self.reproject { reprojection(pose.rotation, display) } else { Mat3::IDENTITY },
             };

@@ -45,11 +45,14 @@ struct WarpUniform {
     offset_left: [f32; 2],
     offset_right: [f32; 2],
     strength: f32,
-    _pad: [f32; 3],
+    /// 1 = the panel is rotated 180° in Windows; a fullscreen swapchain bypasses that, so we rotate
+    rotate: f32,
+    _pad: [f32; 2],
 }
 
 pub struct WarpSettings {
     pub strength: f32,
+    pub rotate: bool,
     pub rect_sign: [f32; 2],
     pub reproject: Mat3,
 }
@@ -374,7 +377,8 @@ impl Renderer {
             offset_left: [0.0; 2],
             offset_right: [0.0; 2],
             strength: 1.0,
-            _pad: [0.0; 3],
+            rotate: 1.0,
+            _pad: [0.0; 2],
         };
         let warp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("warp"),
@@ -487,6 +491,7 @@ impl Renderer {
         self.queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&all[..count]));
 
         self.warp.strength = warp.strength;
+        self.warp.rotate = if warp.rotate { 1.0 } else { 0.0 };
         self.warp.rect_sign = warp.rect_sign;
         self.warp.reproject = warp.reproject.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]);
         self.queue.write_buffer(&self.warp_buffer, 0, bytemuck::bytes_of(&self.warp));
