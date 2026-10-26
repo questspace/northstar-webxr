@@ -189,11 +189,7 @@ impl App {
             let hands = interact::hands(&samples, &self.leap_to_head, rig);
             hand_count = hands.iter().flatten().count();
             actions = self.interaction.update(&hands);
-            let mut draws = self.interaction.draws(&hands, |a| match a {
-                Action::Warp => self.warp,
-                Action::Reproject => self.reproject,
-                Action::Reset => false,
-            });
+            let mut draws = self.interaction.draws(&hands, |_| false);
             draws.extend(scene());
             // Freshest pose for the warp: with ~1 ms pose age this is late latching.
             let display = self.head().0.rotation;
@@ -209,8 +205,6 @@ impl App {
         for action in actions {
             log::info!("button: {action:?}");
             match action {
-                Action::Warp => self.warp = !self.warp,
-                Action::Reproject => self.reproject = !self.reproject,
                 Action::Reset => self.interaction.objects = cubes(),
             }
         }
