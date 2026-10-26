@@ -52,6 +52,7 @@
     <h2>Services</h2>
     <div id="procs"></div>
     <div class="actions">
+      <button onclick="act('display/sweep')">Move stray windows off the headset</button>
       <button class="primary" onclick="act('all/start')">Start bridges + web</button>
       <button class="danger" onclick="act('all/stop')">Stop everything</button>
     </div>
@@ -98,7 +99,8 @@ async function refresh() {
       + row(s.layoutOk ? 'ok' : 'warn', 'Layout', s.layoutOk ? 'laptop primary, panel to the right in native mode' : `wants ${p.native ? p.native.width + '×' + p.native.height + ' @ ' + p.native.hz : '?'}`)
     : row('bad', 'NorthStar panel', 'not detected — check the DisplayPort/USB-C cable');
   $('trackers').innerHTML = row(s.usb.xr50 ? 'ok' : 'bad', 'XR50 on USB') + row(s.usb.leap ? 'ok' : 'bad', 'Ultraleap on USB')
-    + row(s.leapService === 'Running' ? 'ok' : 'bad', 'Ultraleap service', s.leapService);
+    + row(s.leapService === 'Running' ? 'ok' : 'bad', 'Ultraleap service', s.leapService)
+    + row(s.elevated ? 'ok' : 'warn', 'Automatic sensor recovery', s.elevated ? 'on (hub runs elevated)' : 'off — start the hub with run-elevated.cmd');
   const names = { xr50: 'XR50 bridge (ws :8080)', leap: 'Leap bridge (ws :6437)', web: 'Vite dev server (:5173)', native: 'Native XR app', kiosk: 'WebXR on headset' };
   $('procs').innerHTML = Object.entries(names).map(([k, v]) => row(s.processes[k] ? 'ok' : '', v,
     `<button onclick="act('${k}/${s.processes[k] ? 'stop' : 'start'}')">${s.processes[k] ? 'stop' : 'start'}</button>`)).join('');

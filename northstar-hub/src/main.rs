@@ -8,6 +8,7 @@ mod devices;
 mod display;
 mod processes;
 mod watch;
+mod windows;
 
 use processes::{Processes, Spec};
 use serde_json::{json, Value};
@@ -125,6 +126,39 @@ impl Hub {
         self.procs.start(name, self.spec(name)?)
     }
 
+    /// Pushes foreign windows off the panel onto the laptop display.
+    fn sweep_windows(&self) -> Vec<String> {
+        let displays = display::list();
+        let (Some(panel), Some(laptop)) = (displays.iter().find(|d| d.is_panel && d.attached), displays.iter().find(|d| !d.is_panel && d.attached)) else { return vec![] };
+        windows::sweep((panel.x, panel.y, panel.width as i32, panel.height as i32), (laptop.x + 80, laptop.y + 80))
+    }
+
+    /// Elevated only: restarts the Ultraleap service when its frames stop and re-plugs the
+    /// XR50 when it answers degraded, both of which a USB-C link drop causes.
+    fn auto_recover(&self, last: &mut std::time::Instant) {
+        if last.elapsed() < std::time::Duration::from_secs(45) {
+            return;
+        }
+        let usb = devices::usb();
+        let leap = self.procs.tail("leap", 4);
+        if usb.leap && self.procs.running("leap") && leap.lines().count() >= 4 && leap.lines().all(|l| l.starts_with("0 frames/s")) {
+            log::warn!("Ultraleap frames stopped: restarting the service");
+            *last = std::time::Instant::now();
+            if let Err(e) = devices::restart_leap_service() {
+                log::warn!("leap service: {e}");
+            }
+            return;
+        }
+        let xr50 = self.procs.tail("xr50", 3);
+        if usb.xr50 && self.procs.running("xr50") && xr50.contains("Degraded open") {
+            log::warn!("XR50 degraded: re-plugging it over USB");
+            *last = std::time::Instant::now();
+            if let Err(e) = devices::reset_xr50_usb() {
+                log::warn!("xr50 reset: {e}");
+            }
+        }
+    }
+
     fn status(&self) -> Value {
         let displays = display::list();
         let panel = displays.iter().find(|d| d.is_panel).cloned();
@@ -147,6 +181,7 @@ impl Hub {
             "layoutOk": display::layout_ok(&displays),
             "usb": usb,
             "leapService": devices::leap_service_state(),
+            "elevated": windows::elevated(),
             "processes": processes,
             "kioskPage": *self.page.lock().unwrap(),
             "kioskPages": KIOSK_PAGES.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
@@ -163,6 +198,10 @@ impl Hub {
         let parts: Vec<&str> = path.trim_start_matches("/api/").split('/').collect();
         match parts.as_slice() {
             ["display", "fix"] => display::fix_layout().map(|m| json!({ "ok": true, "message": m })),
+            ["display", "sweep"] => {
+                let moved = self.sweep_windows();
+                Ok(json!({ "ok": true, "message": if moved.is_empty() { "nothing on the panel".to_string() } else { format!("moved: {}", moved.join(", ")) } }))
+            }
             ["leap-service", "restart"] => devices::restart_leap_service().map(|_| json!({ "ok": true })),
             ["xr50", "reset-usb"] => devices::reset_xr50_usb().map(|_| json!({ "ok": true })),
             ["all", "start"] => {
@@ -229,18 +268,56 @@ fn main() {
         }
     });
 
-    // Keep the desktop sane whenever the panel (re)appears.
+    // Keep the desktop sane whenever the panel (re)appears, and put the running app back on it:
+    // a USB-C link drop re-enumerates the panel, which loses its rotation and strands the window.
     if auto_display {
-        std::thread::spawn(|| loop {
-            let displays = display::list();
-            if displays.iter().any(|d| d.is_panel) && !display::layout_ok(&displays) {
-                match display::fix_layout() {
-                    Ok(m) => log::info!("display layout fixed: {m}"),
-                    Err(e) => log::warn!("display layout: {e}"),
+        let hub = hub.clone();
+        std::thread::spawn(move || {
+            let mut was_attached = false;
+            loop {
+                let displays = display::list();
+                let attached = displays.iter().any(|d| d.is_panel && d.attached);
+                if attached && !display::layout_ok(&displays) {
+                    match display::fix_layout() {
+                        Ok(m) => log::info!("display layout fixed: {m}"),
+                        Err(e) => log::warn!("display layout: {e}"),
+                    }
                 }
+                if attached && !was_attached {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let moved = hub.sweep_windows();
+                    if !moved.is_empty() {
+                        log::info!("moved off the panel: {}", moved.join(", "));
+                    }
+                    for name in ["native", "kiosk"] {
+                        if hub.procs.running(name) {
+                            log::info!("panel is back: relaunching {name}");
+                            hub.procs.stop(name);
+                            if let Err(e) = hub.start(name) {
+                                log::warn!("relaunch {name}: {e}");
+                            }
+                        }
+                    }
+                }
+                was_attached = attached;
+                std::thread::sleep(std::time::Duration::from_secs(2));
             }
-            std::thread::sleep(std::time::Duration::from_secs(2));
         });
+    }
+
+    // Sensor recovery without clicking through UAC, when the hub was started elevated.
+    if windows::elevated() {
+        let hub = hub.clone();
+        std::thread::spawn(move || {
+            let mut last = std::time::Instant::now() - std::time::Duration::from_secs(60);
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                hub.auto_recover(&mut last);
+            }
+        });
+        log::info!("running elevated: automatic Ultraleap / XR50 recovery on");
+    } else {
+        log::info!("not elevated: sensor recovery needs the buttons (run-elevated.cmd avoids the prompts)");
     }
 
     let server = Server::http(("127.0.0.1", PORT)).expect("bind hub port");

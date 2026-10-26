@@ -43,6 +43,14 @@ picks what the kiosk opens on the headset: the headset scene, the Seeing Spaces 
 is the older bridge-only launcher. Design notes: `docs/WEBXR_PLAN.md`,
 `docs/NATIVE_VS_WEBXR.md`, `docs/ROADMAP.md`.
 
+**Power the headset from its own supply, not the laptop port alone.** With the display, the
+XR50 and the Leap on one laptop USB-C port the link drops every few minutes: the panel
+re-enumerates (and loses its rotation), the XR50 comes back degraded and the Ultraleap
+service freezes. The hub repairs all of that (layout, rotation, relaunching the app on the
+panel, pushing stray windows back to the laptop), and when it is started with
+`northstar-hub/run-elevated.cmd` it also restarts the Ultraleap service and re-plugs the
+XR50 by itself; otherwise those two need the buttons and a UAC click.
+
 The hub also keeps the panel rotated 180° in Windows (`NS_PANEL_ROTATION`, default 2): the
 optics calibration was fitted that way, and Windows forgets it whenever the panel shows up as a
 new monitor. At 0° the warp stops matching the optics and every head motion looks inverted.
