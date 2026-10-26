@@ -40,12 +40,17 @@ pub fn leap_service_state() -> String {
         .unwrap_or_else(|| "?".into())
 }
 
-/// Runs a PowerShell snippet elevated (UAC prompt) and waits for it.
+/// Runs a PowerShell snippet with administrator rights: directly when the hub itself is
+/// elevated, otherwise through a UAC prompt. Waits for it.
 fn elevated(script: &str) -> Result<(), String> {
-    let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &format!("Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command',\"{script}\"")])
-        .status()
-        .map_err(|e| e.to_string())?;
+    let status = if crate::windows::elevated() {
+        std::process::Command::new("powershell").args(["-NoProfile", "-Command", script]).status()
+    } else {
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &format!("Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command',\"{script}\"")])
+            .status()
+    }
+    .map_err(|e| e.to_string())?;
     status.success().then_some(()).ok_or_else(|| "elevated command failed or was declined".into())
 }
 
