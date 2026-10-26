@@ -66,6 +66,14 @@ const DM_BITSPERPEL: u32 = 0x4_0000;
 const DM_PELSWIDTH: u32 = 0x8_0000;
 const DM_PELSHEIGHT: u32 = 0x10_0000;
 const DM_DISPLAYFREQUENCY: u32 = 0x40_0000;
+const DM_DISPLAYORIENTATION: u32 = 0x80;
+
+/// How the panel is mounted relative to a desk monitor: 0, 1, 2, 3 = 0°, 90°, 180°, 270° (DMDO_*).
+/// Windows forgets this whenever the panel re-enumerates as a new monitor, so the hub re-applies it.
+/// Override with NS_PANEL_ROTATION.
+pub fn panel_orientation() -> u32 {
+    std::env::var("NS_PANEL_ROTATION").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
 const CDS_UPDATEREGISTRY: u32 = 0x1;
 const CDS_NORESET: u32 = 0x1000_0000;
 const CDS_SET_PRIMARY: u32 = 0x10;
@@ -94,6 +102,8 @@ pub struct Display {
     pub width: u32,
     pub height: u32,
     pub hz: u32,
+    /// DMDO_* value: 0, 1, 2, 3 = 0°, 90°, 180°, 270°
+    pub orientation: u32,
     pub modes: Vec<Mode>,
 }
 
@@ -149,6 +159,7 @@ pub fn list() -> Vec<Display> {
             width: current.map_or(0, |m| m.pels_width),
             height: current.map_or(0, |m| m.pels_height),
             hz: current.map_or(0, |m| m.display_frequency),
+            orientation: current.map_or(0, |m| m.display_orientation),
             modes,
         });
     }
@@ -171,6 +182,7 @@ pub fn layout_ok(displays: &[Display]) -> bool {
         && laptop.x == 0
         && laptop.y == 0
         && panel.x == laptop.width as i32
+        && panel.orientation == panel_orientation()
         && native.map_or(true, |m| m.width == panel.width && m.height == panel.height && m.hz == panel.hz)
 }
 
@@ -201,7 +213,8 @@ pub fn fix_layout() -> Result<String, String> {
     pan.pels_height = mode.height;
     pan.display_frequency = mode.hz;
     pan.bits_per_pel = 32;
-    pan.fields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
+    pan.display_orientation = panel_orientation();
+    pan.fields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY | DM_DISPLAYORIENTATION;
     let rc = unsafe { ChangeDisplaySettingsExW(panel_name.as_ptr(), &pan, std::ptr::null_mut(), CDS_UPDATEREGISTRY | CDS_NORESET, std::ptr::null_mut()) };
     if rc != 0 {
         return Err(format!("panel mode: ChangeDisplaySettingsEx returned {rc}"));
@@ -211,5 +224,5 @@ pub fn fix_layout() -> Result<String, String> {
     if rc != 0 {
         return Err(format!("apply: ChangeDisplaySettingsEx returned {rc}"));
     }
-    Ok(format!("laptop {} primary at 0,0; panel {} at {},0 in {}x{}@{}", laptop.name, panel.name, lap.pels_width, mode.width, mode.height, mode.hz))
+    Ok(format!("laptop {} primary at 0,0; panel {} at {},0 in {}x{}@{} rotation {}°", laptop.name, panel.name, lap.pels_width, mode.width, mode.height, mode.hz, panel_orientation() * 90))
 }

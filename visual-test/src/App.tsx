@@ -20,7 +20,8 @@ const PANEL = { width: 2880, height: 1600 }
 
 /** Initializes all sensor connections (rendered inside Canvas) */
 function TrackingProvider({ enabled }: { enabled: boolean }) {
-  useXR50(enabled)
+  // `?xr50=0` keeps the head at the origin: a fixed pose for comparing panel output.
+  useXR50(enabled && new URLSearchParams(location.search).get('xr50') !== '0')
   useUltraleap(enabled)
   return null
 }

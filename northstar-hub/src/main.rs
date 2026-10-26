@@ -57,7 +57,7 @@ impl Hub {
                 cwd: root.join("ultraleap-websocket/build-win-vcpkg/Release"),
             },
             "web" => Spec {
-                program: PathBuf::from("cmd"),
+                program: PathBuf::from(std::env::var("ComSpec").unwrap_or_else(|_| "C:/Windows/System32/cmd.exe".into())),
                 args: vec!["/c".into(), "npm".into(), "run".into(), "dev".into()],
                 cwd: root.join("visual-test"),
             },
@@ -86,6 +86,12 @@ impl Hub {
                     args: vec![
                         "--new-window".into(),
                         "--kiosk".into(),
+                        // Console and page state readable with Chrome DevTools Protocol (agents and humans alike).
+                        "--remote-debugging-port=9222".into(),
+                        // The panel hangs off the discrete GPU; rendering there avoids a cross-adapter copy
+                        // and the Intel iGPU, which cannot hold 2880x1600 at the panel rate.
+                        "--force_high_performance_gpu".into(),
+                        "--autoplay-policy=no-user-gesture-required".into(),
                         format!("--window-position={},{}", panel.x, panel.y),
                         format!("--window-size={},{}", panel.width, panel.height),
                         "--user-data-dir=".to_string() + &root.join("logs/kiosk-profile").to_string_lossy(),
@@ -99,10 +105,22 @@ impl Hub {
     }
 
     fn start(&self, name: &str) -> Result<(), String> {
-        // The bridges own the sensors; the apps are their clients.
+        // The bridges own the sensors; the apps are their clients, and only one app
+        // can have the panel at a time.
         if name == "native" || name == "kiosk" {
+            self.procs.stop(if name == "native" { "kiosk" } else { "native" });
             self.start("xr50")?;
             self.start("leap")?;
+            if name == "kiosk" && !port_open(5173) {
+                self.start("web")?;
+                // Vite needs a moment before the kiosk asks for the page.
+                for _ in 0..40 {
+                    if port_open(5173) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+            }
         }
         self.procs.start(name, self.spec(name)?)
     }
@@ -113,7 +131,7 @@ impl Hub {
         let usb = devices::usb();
         let processes: serde_json::Map<String, Value> = ["xr50", "leap", "web", "native", "kiosk"]
             .iter()
-            .map(|n| (n.to_string(), Value::Bool(self.procs.running(n))))
+            .map(|n| (n.to_string(), Value::Bool(self.procs.running(n) || (*n == "web" && port_open(5173)))))
             .collect();
         let logs: serde_json::Map<String, Value> = ["xr50", "leap", "native", "web"]
             .iter()
@@ -122,7 +140,7 @@ impl Hub {
         json!({
             "displays": displays,
             "panel": panel.as_ref().map(|p| json!({
-                "attached": p.attached, "primary": p.primary, "x": p.x, "y": p.y,
+                "attached": p.attached, "primary": p.primary, "x": p.x, "y": p.y, "rotation": p.orientation * 90,
                 "width": p.width, "height": p.height, "hz": p.hz,
                 "native": display::native_mode(p),
             })),
@@ -173,6 +191,11 @@ impl Hub {
             _ => Err(format!("unknown action {path}")),
         }
     }
+}
+
+/// True when something answers on localhost:`port` (the Vite server may be run outside the hub).
+fn port_open(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), std::time::Duration::from_millis(300)).is_ok()
 }
 
 fn reply(request: Request, status: u16, body: String, content_type: &str) {
