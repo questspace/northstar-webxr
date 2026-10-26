@@ -161,11 +161,11 @@ fn cubes() -> Vec<Object> {
         .collect()
 }
 
-/// Warp, re-projection and reset buttons at chest height, facing the user.
+/// One reset button, low and to the side so a passing hand does not hit it. (Warp and
+/// re-projection stay on the keyboard: a toggle in reach of the hands got pressed by accident
+/// and switched the optics off.)
 fn buttons() -> Vec<Button> {
-    [(-0.1, Vec3::new(0.17, 0.42, 0.69), Action::Warp), (0.0, Vec3::new(0.5, 0.35, 0.8), Action::Reproject), (0.1, Vec3::new(0.8, 0.25, 0.25), Action::Reset)]
-        .map(|(x, color, action)| Button::new(Vec3::new(x, 1.35, -0.6), color, action))
-        .into()
+    vec![Button::new(Vec3::new(0.45, 1.0, -0.6), Vec3::new(0.8, 0.25, 0.25), Action::Reset)]
 }
 
 impl App {
