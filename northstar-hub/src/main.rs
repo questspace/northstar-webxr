@@ -135,7 +135,7 @@ impl Hub {
 
     /// Elevated only: restarts the Ultraleap service when its frames stop and re-plugs the
     /// XR50 when it answers degraded, both of which a USB-C link drop causes.
-    fn auto_recover(&self, last: &mut std::time::Instant) {
+    fn auto_recover(&self, last: &mut std::time::Instant, last_xr50: &mut std::time::Instant) {
         if last.elapsed() < std::time::Duration::from_secs(45) {
             return;
         }
@@ -149,10 +149,13 @@ impl Hub {
             }
             return;
         }
+        // The XR50 re-plug helps once per episode at best (a degraded unit usually needs real
+        // power), so it runs at most every ten minutes.
         let xr50 = self.procs.tail("xr50", 3);
-        if usb.xr50 && self.procs.running("xr50") && xr50.contains("Degraded open") {
-            log::warn!("XR50 degraded: re-plugging it over USB");
+        if usb.xr50 && self.procs.running("xr50") && (xr50.contains("Degraded open") || xr50.contains("Failed to open device")) && last_xr50.elapsed() > std::time::Duration::from_secs(600) {
+            log::warn!("XR50 not answering: re-plugging it over USB");
             *last = std::time::Instant::now();
+            *last_xr50 = std::time::Instant::now();
             if let Err(e) = devices::reset_xr50_usb() {
                 log::warn!("xr50 reset: {e}");
             }
@@ -310,9 +313,10 @@ fn main() {
         let hub = hub.clone();
         std::thread::spawn(move || {
             let mut last = std::time::Instant::now() - std::time::Duration::from_secs(60);
+            let mut last_xr50 = std::time::Instant::now() - std::time::Duration::from_secs(600);
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(5));
-                hub.auto_recover(&mut last);
+                hub.auto_recover(&mut last, &mut last_xr50);
             }
         });
         log::info!("running elevated: automatic Ultraleap / XR50 recovery on");
@@ -327,6 +331,11 @@ fn main() {
         match (request.method(), path.as_str()) {
             (Method::Get, "/") => reply(request, 200, UI.to_string(), "text/html; charset=utf-8"),
             (Method::Get, "/api/status") => reply(request, 200, hub.status().to_string(), "application/json"),
+            // Lets a rebuild replace the exe without an elevated kill; children are stopped on drop.
+            (Method::Post, "/api/hub/exit") => {
+                reply(request, 200, json!({ "ok": true }).to_string(), "application/json");
+                break;
+            }
             (Method::Post, p) if p.starts_with("/api/") => match hub.action(p) {
                 Ok(v) => reply(request, 200, v.to_string(), "application/json"),
                 Err(e) => reply(request, 400, json!({ "ok": false, "error": e }).to_string(), "application/json"),
