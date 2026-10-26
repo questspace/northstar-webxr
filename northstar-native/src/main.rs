@@ -46,6 +46,10 @@ struct Options {
     /// Render on the integrated GPU (use when the panel is wired to it)
     low_power: bool,
     calibration: String,
+    /// Extra output rotation (degrees). Windows rotates a fullscreen swapchain like any window, so
+    /// with the hub's 180° panel rotation nothing is needed here; `--panel-rotation 180` is for a
+    /// Windows setup that cannot rotate the panel.
+    panel_rotation: u32,
 }
 
 fn options() -> Options {
@@ -61,6 +65,7 @@ fn options() -> Options {
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         low_power: args.iter().any(|a| a == "--low-power"),
+        panel_rotation: value("--panel-rotation").and_then(|v| v.parse().ok()).unwrap_or(0),
         calibration: value("--calibration")
             .unwrap_or_else(|| "../visual-test/public/calibration/EskySettings.json".into()),
     }
@@ -158,11 +163,11 @@ fn cubes() -> Vec<Object> {
         .collect()
 }
 
-/// Warp, re-projection and reset buttons at chest height, facing the user.
+/// One reset button, low and to the side so a passing hand does not hit it. (Warp and
+/// re-projection stay on the keyboard: a toggle in reach of the hands got pressed by accident
+/// and switched the optics off.)
 fn buttons() -> Vec<Button> {
-    [(-0.1, Vec3::new(0.17, 0.42, 0.69), Action::Warp), (0.0, Vec3::new(0.5, 0.35, 0.8), Action::Reproject), (0.1, Vec3::new(0.8, 0.25, 0.25), Action::Reset)]
-        .map(|(x, color, action)| Button::new(Vec3::new(x, 1.35, -0.6), color, action))
-        .into()
+    vec![Button::new(Vec3::new(0.45, 1.0, -0.6), Vec3::new(0.8, 0.25, 0.25), Action::Reset)]
 }
 
 impl App {
@@ -186,16 +191,13 @@ impl App {
             let hands = interact::hands(&samples, &self.leap_to_head, rig);
             hand_count = hands.iter().flatten().count();
             actions = self.interaction.update(&hands);
-            let mut draws = self.interaction.draws(&hands, |a| match a {
-                Action::Warp => self.warp,
-                Action::Reproject => self.reproject,
-                Action::Reset => false,
-            });
+            let mut draws = self.interaction.draws(&hands, |_| false);
             draws.extend(scene());
             // Freshest pose for the warp: with ~1 ms pose age this is late latching.
             let display = self.head().0.rotation;
             let warp = WarpSettings {
                 strength: if self.warp { 1.0 } else { 0.0 },
+                rotate: self.options.panel_rotation == 180 && !self.options.windowed,
                 rect_sign: self.rect_sign,
                 reproject: if self.reproject { reprojection(pose.rotation, display) } else { Mat3::IDENTITY },
             };
@@ -205,8 +207,6 @@ impl App {
         for action in actions {
             log::info!("button: {action:?}");
             match action {
-                Action::Warp => self.warp = !self.warp,
-                Action::Reproject => self.reproject = !self.reproject,
                 Action::Reset => self.interaction.objects = cubes(),
             }
         }

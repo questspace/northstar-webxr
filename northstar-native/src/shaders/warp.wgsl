@@ -10,6 +10,7 @@ struct Warp {
   offset_left: vec2<f32>,
   offset_right: vec2<f32>,
   strength: f32,
+  rotate: f32,
 }
 @group(0) @binding(0) var<uniform> warp: Warp;
 @group(0) @binding(1) var eyes: texture_2d<f32>;

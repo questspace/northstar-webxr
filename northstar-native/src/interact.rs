@@ -39,7 +39,7 @@ impl Object {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Action { Warp, Reproject, Reset }
+pub enum Action { Reset }
 
 pub struct Button {
     pub position: Vec3,
