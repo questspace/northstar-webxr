@@ -229,17 +229,35 @@ fn main() {
         }
     });
 
-    // Keep the desktop sane whenever the panel (re)appears.
+    // Keep the desktop sane whenever the panel (re)appears, and put the running app back on it:
+    // a USB-C link drop re-enumerates the panel, which loses its rotation and strands the window.
     if auto_display {
-        std::thread::spawn(|| loop {
-            let displays = display::list();
-            if displays.iter().any(|d| d.is_panel) && !display::layout_ok(&displays) {
-                match display::fix_layout() {
-                    Ok(m) => log::info!("display layout fixed: {m}"),
-                    Err(e) => log::warn!("display layout: {e}"),
+        let hub = hub.clone();
+        std::thread::spawn(move || {
+            let mut was_attached = false;
+            loop {
+                let displays = display::list();
+                let attached = displays.iter().any(|d| d.is_panel && d.attached);
+                if attached && !display::layout_ok(&displays) {
+                    match display::fix_layout() {
+                        Ok(m) => log::info!("display layout fixed: {m}"),
+                        Err(e) => log::warn!("display layout: {e}"),
+                    }
                 }
+                if attached && !was_attached {
+                    for name in ["native", "kiosk"] {
+                        if hub.procs.running(name) {
+                            log::info!("panel is back: relaunching {name}");
+                            hub.procs.stop(name);
+                            if let Err(e) = hub.start(name) {
+                                log::warn!("relaunch {name}: {e}");
+                            }
+                        }
+                    }
+                }
+                was_attached = attached;
+                std::thread::sleep(std::time::Duration::from_secs(2));
             }
-            std::thread::sleep(std::time::Duration::from_secs(2));
         });
     }
 
