@@ -207,10 +207,15 @@ scale = 2^(-14) = 1/16384 = 6.103515625e-05
 
 - Translation is in meters, right-handed world frame in camera convention: X=right, **Y=down**, Z=forward
   (measured: lifting the device decreases y, moving forward increases z)
-- The rotation is world←device. The device frame is rotated 180° about Z from the world frame
-  when the unit is level (rest quaternion ≈ `[qx,qy,qz,qw] = [0.05, 0.22, 0.97, -0.12]`), i.e. the
-  reported device axes are X=left, Y=up, Z=forward. Three.js conversion: position `(x, -y, -z)`,
-  rotation `Rx(180°) · R · Ry(180°)` (see `visual-test/src/lib/transforms.ts`)
+- The rotation is world←device. Both frames are camera convention (X=right, Y=down, Z=forward);
+  the rest quaternion of a level unit is ≈ `[qx,qy,qz,qw] = [0.05, 0.22, 0.97, -0.12]` (the SLAM
+  world frame is set at start-up, about 180° about Z from the device). Three.js conversion,
+  verified on the headset on 2026-10-26: position `(x, -y, -z)`, rotation
+  `Rx(180°) · R · Rx(180°)` (see `visual-test/src/lib/transforms.ts`). A wrong device-side
+  constant rolls the view (floor overhead, left/right swapped) and masks a wrong world-side
+  constant, so apparent motion can look right while both are wrong; fix the roll first.
+- The NorthStar panel must be rotated 180° in Windows for the optics calibration to match
+  (`northstar-hub` enforces it, `NS_PANEL_ROTATION`).
 - While SLAM is lost (confidence 0) the translation saturates at ±131071.9999 m; the orientation
   is still valid (IMU-only)
 - Quaternion wire order is **[w, x, y, z]** (bytes 19-26), confirmed by C++ `libxvisio/src/slam.cpp`

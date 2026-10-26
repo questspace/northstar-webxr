@@ -49,7 +49,8 @@ export const defaultCalibrationSettings = (): CalibrationProfileSettings => ({
   handPitchOffset: 0,
   handYawOffset: 0,
   distortionStrength: 1,
-  // Verified on the headset: -1 shows the floor above the eye-level anchors.
+  // Optics-only signs. Do not use them to fix tracking: an upside-down or mirrored world is a
+  // frame constant in lib/transforms.ts or the Windows panel rotation (see PROTOCOL.md).
   rectSignX: 1,
   rectSignY: 1,
   leftUvOffsetX: 0,

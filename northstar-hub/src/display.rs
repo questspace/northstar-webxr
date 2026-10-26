@@ -70,9 +70,10 @@ const DM_DISPLAYORIENTATION: u32 = 0x80;
 
 /// How the panel is mounted relative to a desk monitor: 0, 1, 2, 3 = 0°, 90°, 180°, 270° (DMDO_*).
 /// Windows forgets this whenever the panel re-enumerates as a new monitor, so the hub re-applies it.
-/// Override with NS_PANEL_ROTATION.
+/// Override with NS_PANEL_ROTATION. This NorthStar wants 180° (verified on the head 2026-10-26: with
+/// 0° the warp no longer matches the optics and every head motion is inverted).
 pub fn panel_orientation() -> u32 {
-    std::env::var("NS_PANEL_ROTATION").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+    std::env::var("NS_PANEL_ROTATION").ok().and_then(|v| v.parse().ok()).unwrap_or(2)
 }
 const CDS_UPDATEREGISTRY: u32 = 0x1;
 const CDS_NORESET: u32 = 0x1000_0000;

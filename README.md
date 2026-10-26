@@ -43,6 +43,10 @@ picks what the kiosk opens on the headset: the headset scene, the Seeing Spaces 
 is the older bridge-only launcher. Design notes: `docs/WEBXR_PLAN.md`,
 `docs/NATIVE_VS_WEBXR.md`, `docs/ROADMAP.md`.
 
+The hub also keeps the panel rotated 180° in Windows (`NS_PANEL_ROTATION`, default 2): the
+optics calibration was fitted that way, and Windows forgets it whenever the panel shows up as a
+new monitor. At 0° the warp stops matching the optics and every head motion looks inverted.
+
 Disable USB selective suspend once (admin), or the headset's USB hub gets put to sleep
 mid-session and both trackers drop:
 `powercfg /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0`

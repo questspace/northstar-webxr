@@ -6,15 +6,16 @@ import type { HeadPose, Quat, Vec3 } from '../stores/tracking'
 /**
  * Frame conventions, checked against live XR50 data and on the headset
  * (see PROTOCOL.md):
- *  - XR50 device frame: X right, Y down, Z forward (camera convention).
- *  - Its world frame sits 180° about Z from the device when the headset is level
- *    (rest quaternion ≈ [0.05, 0.22, 0.97, -0.12]): X left, Y up, Z forward.
- *    (The mirror reading — world Y down, device X left — fits the rest pose too,
- *    but made the world turn with the head when worn.)
+ *  - XR50 device frame and SLAM world frame: both X right, Y down, Z forward
+ *    (camera convention); the world frame is set at start-up, ~180° about Z from
+ *    the device when level (rest quaternion ≈ [0.05, 0.22, 0.97, -0.12]).
  *  - Three.js world: X right, Y up, Z back; a camera looks down -Z.
+ *  Verified on the head 2026-10-26 with the panel rotated 180° in Windows. The
+ *  earlier Y-based constants rolled the view and cancelled inverted motion, which
+ *  looked right until the roll was fixed.
  */
-const XR50_WORLD_TO_THREE = new THREE.Quaternion(0, 1, 0, 0) // 180° about Y: (x, y, z) → (-x, y, -z)
-const XR50_DEVICE_TO_CAMERA = new THREE.Quaternion(1, 0, 0, 0) // 180° about X
+const XR50_WORLD_TO_THREE = new THREE.Quaternion(1, 0, 0, 0) // 180° about X: (x, y, z) → (x, -y, -z)
+const XR50_DEVICE_TO_CAMERA = new THREE.Quaternion(1, 0, 0, 0) // 180° about X: camera convention → GL camera
 
 /** Height of the SLAM origin above the virtual floor. */
 const EYE_HEIGHT = 1.6
@@ -34,7 +35,7 @@ export const xr50ToThree = (position: Vec3, quaternion: Quat) => {
     .multiply(new THREE.Quaternion().fromArray(quaternion))
     .multiply(XR50_DEVICE_TO_CAMERA)
   return {
-    position: [-position[0], position[1], -position[2]] as Vec3,
+    position: [position[0], -position[1], -position[2]] as Vec3,
     quaternion: q.toArray() as Quat,
   }
 }
