@@ -10,12 +10,14 @@ pub type Connection = *mut c_void;
 pub const RS_SUCCESS: u32 = 0;
 pub const RS_TIMEOUT: u32 = 0xE201_0004;
 pub const EVENT_CONNECTION: u32 = 1;
+pub const EVENT_CONNECTION_LOST: u32 = 2;
+pub const EVENT_POLICY: u32 = 5;
 pub const EVENT_TRACKING: u32 = 0x100;
 pub const TRACKING_MODE_HMD: u32 = 1;
 pub const POLICY_BACKGROUND_FRAMES: u64 = 0x1;
 pub const HAND_LEFT: u32 = 0;
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Vector {
     pub x: f32,
@@ -23,7 +25,7 @@ pub struct Vector {
     pub z: f32,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Quaternion {
     pub x: f32,
@@ -32,7 +34,7 @@ pub struct Quaternion {
     pub w: f32,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Bone {
     pub prev_joint: Vector,
@@ -41,7 +43,7 @@ pub struct Bone {
     pub rotation: Quaternion,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Digit {
     pub finger_id: i32,
@@ -50,7 +52,7 @@ pub struct Digit {
     pub is_extended: u32,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Palm {
     pub position: Vector,
@@ -62,7 +64,7 @@ pub struct Palm {
     pub orientation: Quaternion,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Hand {
     pub id: u32,
@@ -80,14 +82,14 @@ pub struct Hand {
     pub arm: Bone,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 pub struct FrameHeader {
     pub reserved: *mut c_void,
     pub frame_id: i64,
     pub timestamp: i64,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 pub struct TrackingEvent {
     pub info: FrameHeader,
     pub tracking_frame_id: i64,
@@ -96,11 +98,13 @@ pub struct TrackingEvent {
     pub framerate: f32,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 pub struct ConnectionMessage {
     pub size: u32,
     pub event_type: u32,
     pub pointer: *const c_void,
+    /// Present since LeapC 5; without it LeapPollConnection writes past the struct.
+    pub device_id: u32,
 }
 
 extern "system" {

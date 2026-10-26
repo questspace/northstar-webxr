@@ -6,7 +6,7 @@ import * as THREE from 'three'
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js'
 import { XRHandModelFactory } from 'three/examples/jsm/webxr/XRHandModelFactory.js'
 import { bootNorthStarXR } from './boot'
-import { keepFloorSpace } from '../app'
+import { autoStartSession, keepFloorSpace } from '../app'
 
 const main = async () => {
   await bootNorthStarXR()
@@ -23,6 +23,7 @@ const main = async () => {
   document.body.appendChild(renderer.domElement)
   document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hand-tracking'] }))
   keepFloorSpace(renderer)
+  autoStartSession(renderer)
 
   const handModelFactory = new XRHandModelFactory()
   for (const i of [0, 1]) {

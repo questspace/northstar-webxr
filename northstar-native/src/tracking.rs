@@ -143,12 +143,15 @@ pub fn spawn_xr50_client(shared: Shared, url: String) {
 fn vec(v: leapc::Vector) -> Vec3 { Vec3::new(v.x, v.y, v.z) }
 
 fn hand_sample(hand: &leapc::Hand) -> HandSample {
-    let mut joints = vec![vec(hand.palm.position), vec(hand.arm.next_joint)];
-    for digit in &hand.digits {
-        joints.push(vec(digit.bones[0].prev_joint));
-        joints.extend(digit.bones.iter().map(|b| vec(b.next_joint)));
+    // LeapC structs are packed: copy fields out before touching them.
+    let (palm, arm, digits) = (hand.palm, hand.arm, hand.digits);
+    let mut joints = vec![vec(palm.position), vec(arm.next_joint)];
+    for digit in digits {
+        let bones = digit.bones;
+        joints.push(vec(bones[0].prev_joint));
+        joints.extend(bones.iter().map(|b| vec(b.next_joint)));
     }
-    let o = hand.palm.orientation;
+    let o = palm.orientation;
     HandSample { left: hand.hand_type == leapc::HAND_LEFT, palm_orientation: Quat::from_xyzw(o.x, o.y, o.z, o.w), joints }
 }
 
@@ -168,7 +171,8 @@ pub fn spawn_leap(shared: Shared) -> Result<(), String> {
         .name("leap".into())
         .spawn(move || {
             let connection = connection as leapc::Connection;
-            let mut msg = leapc::ConnectionMessage { size: 0, event_type: 0, pointer: std::ptr::null() };
+            let mut msg = leapc::ConnectionMessage { size: 0, event_type: 0, pointer: std::ptr::null(), device_id: 0 };
+            let mut connected = false;
             let mut seen = std::collections::HashSet::new();
             loop {
                 let rs = unsafe { leapc::LeapPollConnection(connection, 1000, &mut msg) };
@@ -176,27 +180,47 @@ pub fn spawn_leap(shared: Shared) -> Result<(), String> {
                     log::warn!("LeapPollConnection: {rs:#x}");
                     continue;
                 }
-                if seen.insert(msg.event_type) {
-                    log::info!("LeapC event type {:#x} (poll rs {rs:#x})", msg.event_type);
+                let event_type = { msg.event_type };
+                if seen.insert(event_type) {
+                    log::info!("LeapC event type {event_type:#x} (poll rs {rs:#x})");
                 }
-                match msg.event_type {
+                match event_type {
+                    leapc::EVENT_POLICY if !msg.pointer.is_null() => {
+                        let flags = unsafe { *({ msg.pointer } as *const [u32; 2]) }[1];
+                        log::info!("Ultraleap policy flags now {flags:#x}");
+                    }
+                    leapc::EVENT_CONNECTION_LOST => {
+                        connected = false;
+                        log::warn!("Ultraleap connection lost - waiting for the service");
+                    }
                     leapc::EVENT_CONNECTION => unsafe {
+                        connected = true;
                         // Frames only flow to the foreground app unless we ask for background frames.
-                        leapc::LeapSetPolicyFlags(connection, leapc::POLICY_BACKGROUND_FRAMES, 0);
-                        leapc::LeapSetTrackingMode(connection, leapc::TRACKING_MODE_HMD);
-                        log::info!("Ultraleap connected (HMD mode, background frames)");
+                        let policy = leapc::LeapSetPolicyFlags(connection, leapc::POLICY_BACKGROUND_FRAMES, 0);
+                        let mode = leapc::LeapSetTrackingMode(connection, leapc::TRACKING_MODE_HMD);
+                        log::info!("Ultraleap connected (background frames {policy:#x}, HMD mode {mode:#x})");
                     },
                     leapc::EVENT_TRACKING => {
-                        let event = unsafe { &*(msg.pointer as *const leapc::TrackingEvent) };
-                        let n = event.n_hands as usize;
-                        if n > 4 || (n > 0 && event.hands.is_null()) {
-                            log::warn!("LeapC tracking event with {n} hands at {:?}: layout mismatch, skipping", event.hands);
+                        if !connected || { msg.pointer }.is_null() {
+                            log::warn!("tracking event ignored (connected {connected}, pointer {:?})", { msg.pointer });
                             continue;
                         }
-                        let hands = unsafe { std::slice::from_raw_parts(event.hands, n) };
+                        let event = unsafe { &*(msg.pointer as *const leapc::TrackingEvent) };
+                        let n = { event.n_hands } as usize;
+                        if shared.leap_frames.load(std::sync::atomic::Ordering::Relaxed) < 3 {
+                            let (size, ptr, frame, at, rate) = ({ msg.size }, { msg.pointer }, { event.tracking_frame_id }, { event.hands }, { event.framerate });
+                            log::info!("tracking event: msg size {size} ptr {ptr:?} frame {frame} hands {n} at {at:?} rate {rate}");
+                        }
+                        let hands_ptr = { event.hands };
+                        if n > 4 || (n > 0 && hands_ptr.is_null()) {
+                            log::warn!("LeapC tracking event with {n} hands at {hands_ptr:?}: layout mismatch, skipping");
+                            continue;
+                        }
+                        let hands = unsafe { std::slice::from_raw_parts(hands_ptr, n) };
                         if n > 0 && shared.leap_frames.load(std::sync::atomic::Ordering::Relaxed) % 60 == 0 {
-                            let h = &hands[0];
-                            log::info!("hand id={} type={} palm=({:.0},{:.0},{:.0}) pinch={:.2} frame={}", h.id, h.hand_type, h.palm.position.x, h.palm.position.y, h.palm.position.z, h.pinch_strength, event.tracking_frame_id);
+                            let h = hands[0];
+                            let (p, frame) = (h.palm.position, event.tracking_frame_id);
+                            log::info!("hand id={} type={} palm=({:.0},{:.0},{:.0}) pinch={:.2} frame={}", { h.id }, { h.hand_type }, { p.x }, { p.y }, { p.z }, { h.pinch_strength }, frame);
                         }
                         *shared.hands.lock().unwrap() = hands.iter().map(hand_sample).collect();
                         shared.leap_frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
