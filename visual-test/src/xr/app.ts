@@ -47,6 +47,19 @@ export const keepFloorSpace = (renderer: THREE.WebGLRenderer) => {
   }
 }
 
+export const SESSION_INIT = { requiredFeatures: ['hand-tracking', 'local-floor'], optionalFeatures: ['anchors'] }
+
+/**
+ * On the headset nobody can click START AR: the NorthStar runtime needs no user
+ * gesture, so the session starts on load (`?autostart=0` keeps the button only).
+ */
+export const autoStartSession = (renderer: THREE.WebGLRenderer) => {
+  if (query.get('autostart') === '0' || !navigator.userAgent.includes('NorthStar/IWER')) return
+  navigator.xr!.requestSession('immersive-ar', SESSION_INIT)
+    .then((session) => renderer.xr.setSession(session))
+    .catch((err) => console.warn('[XR] auto start failed:', err))
+}
+
 export const createXRApp = async ({ lookFrom = { x: 0.5, y: 1.5, z: 0.5 }, lookAt = { x: 0, y: 1.0, z: -0.7 }, showHands = query.get('hands') === 'show' }: XRAppOptions = {}): Promise<XRApp> => {
   const xr = await bootNorthStarXR()
   if (query.get('warp') === '0') xr.warpEnabled = false
@@ -64,8 +77,9 @@ export const createXRApp = async ({ lookFrom = { x: 0.5, y: 1.5, z: 0.5 }, lookA
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.xr.enabled = true
   document.body.appendChild(renderer.domElement)
-  document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hand-tracking', 'local-floor'], optionalFeatures: ['anchors'] }))
+  document.body.appendChild(ARButton.createButton(renderer, SESSION_INIT))
   keepFloorSpace(renderer)
+  autoStartSession(renderer)
 
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.target.copy(lookAt)
