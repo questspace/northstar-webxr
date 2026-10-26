@@ -26,3 +26,17 @@ cargo run --release -- --no-auto-display
 
 API (all local): `GET /api/status`, `POST /api/display/fix`, `POST /api/<xr50|leap|web|native|kiosk>/<start|stop>`,
 `POST /api/all/<start|stop>`, `POST /api/leap-service/restart`, `POST /api/xr50/reset-usb`, `POST /api/dev/native/<on|off>`.
+
+## Debugging the kiosk page
+
+The kiosk runs with `--remote-debugging-port=9222`, so its console and page state are
+readable without touching the headset:
+
+```
+node northstar-hub/kiosk-console.mjs "document.title"            # console tail + evaluated expression
+RELOAD=1 node northstar-hub/kiosk-console.mjs "location.href" 8000   # reload first, wait 8 s
+```
+
+The `[XR] … fps … pose age` lines are the health check: 60 fps and ≤10 ms pose age is right.
+The kiosk is launched with `--force_high_performance_gpu`; on the Intel iGPU the same page
+drops to ~50 fps with 40 ms pose age and every head turn lags.

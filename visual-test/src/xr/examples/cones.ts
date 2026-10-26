@@ -5,6 +5,7 @@
 import * as THREE from 'three'
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js'
 import { bootNorthStarXR } from './boot'
+import { keepFloorSpace } from '../app'
 
 const main = async () => {
   await bootNorthStarXR()
@@ -19,6 +20,7 @@ const main = async () => {
   renderer.xr.enabled = true
   document.body.appendChild(renderer.domElement)
   document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hand-tracking'] }))
+  keepFloorSpace(renderer)
 
   const geometry = new THREE.CylinderGeometry(0, 0.05, 0.2, 32).rotateX(Math.PI / 2)
   const onSelect = (controller: THREE.Object3D) => () => {

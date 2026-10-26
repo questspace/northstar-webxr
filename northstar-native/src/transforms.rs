@@ -6,9 +6,9 @@ use std::f32::consts::PI;
 /// Height of the SLAM origin above the virtual floor.
 pub const EYE_HEIGHT: f32 = 1.6;
 
-/// XR50 world frame (X left, Y up, Z forward) → head frame: 180° about Y.
-fn world_to_three() -> Quat { Quat::from_rotation_y(PI) }
-/// Device axes are X right, Y down, Z forward (camera convention) → camera: 180° about X.
+/// XR50 world frame is camera convention (X right, Y down, Z forward) → head frame: 180° about X.
+fn world_to_three() -> Quat { Quat::from_rotation_x(PI) }
+/// Device axes are camera convention too → GL camera (X right, Y up, Z back): 180° about X.
 fn device_to_camera() -> Quat { Quat::from_rotation_x(PI) }
 
 #[derive(Clone, Copy, Debug)]
@@ -25,7 +25,7 @@ impl Default for Pose {
 pub fn xr50_to_three(translation: [f64; 3], quaternion: [f64; 4]) -> Pose {
     let q = Quat::from_xyzw(quaternion[0] as f32, quaternion[1] as f32, quaternion[2] as f32, quaternion[3] as f32);
     Pose {
-        position: Vec3::new(-translation[0] as f32, translation[1] as f32, -translation[2] as f32),
+        position: Vec3::new(translation[0] as f32, -translation[1] as f32, -translation[2] as f32),
         rotation: world_to_three() * q * device_to_camera(),
     }
 }

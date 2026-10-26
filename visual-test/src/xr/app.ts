@@ -38,6 +38,15 @@ export interface XRAppOptions {
 
 export const query = new URLSearchParams(location.search)
 
+/** ARButton switches the session to the `local` space (origin at the head); scenes here are floor-based. */
+export const keepFloorSpace = (renderer: THREE.WebGLRenderer) => {
+  const setSession = renderer.xr.setSession.bind(renderer.xr)
+  renderer.xr.setSession = (session) => {
+    renderer.xr.setReferenceSpaceType('local-floor')
+    return setSession(session)
+  }
+}
+
 export const createXRApp = async ({ lookFrom = { x: 0.5, y: 1.5, z: 0.5 }, lookAt = { x: 0, y: 1.0, z: -0.7 }, showHands = query.get('hands') === 'show' }: XRAppOptions = {}): Promise<XRApp> => {
   const xr = await bootNorthStarXR()
   if (query.get('warp') === '0') xr.warpEnabled = false
@@ -56,12 +65,7 @@ export const createXRApp = async ({ lookFrom = { x: 0.5, y: 1.5, z: 0.5 }, lookA
   renderer.xr.enabled = true
   document.body.appendChild(renderer.domElement)
   document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hand-tracking', 'local-floor'], optionalFeatures: ['anchors'] }))
-  // ARButton switches to the `local` space (origin at the head); everything here is floor-based.
-  const setSession = renderer.xr.setSession.bind(renderer.xr)
-  renderer.xr.setSession = (session) => {
-    renderer.xr.setReferenceSpaceType('local-floor')
-    return setSession(session)
-  }
+  keepFloorSpace(renderer)
 
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.target.copy(lookAt)

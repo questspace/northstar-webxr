@@ -332,7 +332,7 @@ fn main() {
         renderer: None,
         warp: true,
         reproject: true,
-        // Verified on the headset: a negative vertical sign puts the floor above the anchors.
+        // Optics-only signs; tracking orientation is fixed in transforms.rs and by the panel rotation.
         rect_sign: [1.0, 1.0],
         stats: Stats::default(),
     };
