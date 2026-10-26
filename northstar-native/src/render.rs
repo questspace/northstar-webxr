@@ -45,7 +45,7 @@ struct WarpUniform {
     offset_left: [f32; 2],
     offset_right: [f32; 2],
     strength: f32,
-    /// 1 = the panel is rotated 180° in Windows; a fullscreen swapchain bypasses that, so we rotate
+    /// 1 = rotate the output 180° (for a panel Windows does not rotate)
     rotate: f32,
     _pad: [f32; 2],
 }
@@ -377,7 +377,7 @@ impl Renderer {
             offset_left: [0.0; 2],
             offset_right: [0.0; 2],
             strength: 1.0,
-            rotate: 1.0,
+            rotate: 0.0,
             _pad: [0.0; 2],
         };
         let warp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

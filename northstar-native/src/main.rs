@@ -46,7 +46,9 @@ struct Options {
     /// Render on the integrated GPU (use when the panel is wired to it)
     low_power: bool,
     calibration: String,
-    /// Panel rotation applied by Windows (the hub sets 180°); the swapchain ignores it, we compensate
+    /// Extra output rotation (degrees). Windows rotates a fullscreen swapchain like any window, so
+    /// with the hub's 180° panel rotation nothing is needed here; `--panel-rotation 180` is for a
+    /// Windows setup that cannot rotate the panel.
     panel_rotation: u32,
 }
 
@@ -63,7 +65,7 @@ fn options() -> Options {
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         low_power: args.iter().any(|a| a == "--low-power"),
-        panel_rotation: value("--panel-rotation").and_then(|v| v.parse().ok()).unwrap_or(180),
+        panel_rotation: value("--panel-rotation").and_then(|v| v.parse().ok()).unwrap_or(0),
         calibration: value("--calibration")
             .unwrap_or_else(|| "../visual-test/public/calibration/EskySettings.json".into()),
     }
