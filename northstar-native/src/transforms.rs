@@ -36,7 +36,10 @@ pub fn rig(pose: &Pose) -> Mat4 {
 }
 
 /// Leap sensor frame → head frame for the HMD mount (measured: hand right → Leap -X,
-/// up → Leap -Z, forward → Leap +Y), then the calibrated sensor tilt and offset.
+/// up → Leap -Z, forward → Leap +Y), then the calibrated sensor tilt and offset, then rolled 180°
+/// about the view axis into the rig: the rig is the real head frame rolled 180° (the Esky warp
+/// expects the panel rotated 180°, and the XR50 conversion was tuned against that). Found on the
+/// head 2026-10-27: hands moved opposite on both screen axes with depth correct.
 pub struct LeapToHead { rotation: Quat, offset: Vec3 }
 
 impl LeapToHead {
@@ -46,7 +49,8 @@ impl LeapToHead {
             Vec3::new(0.0, 0.0, -1.0),
             Vec3::new(0.0, -1.0, 0.0),
         ));
-        Self { rotation: c.leap_rotation * mount, offset: c.leap_translation }
+        let head_to_rig = Quat::from_rotation_z(std::f32::consts::PI);
+        Self { rotation: head_to_rig * c.leap_rotation * mount, offset: head_to_rig * c.leap_translation }
     }
 
     pub fn point(&self, mm: Vec3) -> Vec3 { self.rotation * (mm * 0.001) + self.offset }

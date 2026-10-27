@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { bootNorthStarXR } from './examples/boot'
+import { createRoomOccluder } from './room'
 import { createInteraction, type Interaction } from './interaction'
 import { createHandOccluders } from './hands'
 
@@ -47,7 +48,8 @@ export const keepFloorSpace = (renderer: THREE.WebGLRenderer) => {
   }
 }
 
-export const SESSION_INIT = { requiredFeatures: ['hand-tracking', 'local-floor'], optionalFeatures: ['anchors'] }
+/** Planes, meshes and hit tests come from the real room when the bridge runs its recon source. */
+export const SESSION_INIT = { requiredFeatures: ['hand-tracking', 'local-floor'], optionalFeatures: ['anchors', 'plane-detection', 'mesh-detection', 'hit-test'] }
 
 /**
  * On the headset nobody can click START AR: the NorthStar runtime needs no user
@@ -87,6 +89,7 @@ export const createXRApp = async ({ lookFrom = { x: 0.5, y: 1.5, z: 0.5 }, lookA
 
   const interaction = createInteraction(renderer, scene)
   const occluders = createHandOccluders(renderer, scene, { visible: showHands })
+  const room = createRoomOccluder(scene, { visible: query.has('mesh') })
 
   let referenceSpace: XRReferenceSpace | null = null
   const sessionStart: ((session: XRSession) => void)[] = []
@@ -106,6 +109,7 @@ export const createXRApp = async ({ lookFrom = { x: 0.5, y: 1.5, z: 0.5 }, lookA
     current = frame
     interaction.update()
     occluders.update()
+    room.update(frame, referenceSpace)
     for (const fn of callbacks) fn(dt, time / 1000, frame)
     renderer.render(scene, camera)
   })

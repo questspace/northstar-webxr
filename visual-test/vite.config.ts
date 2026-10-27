@@ -33,6 +33,7 @@ export default defineConfig({
         hands: resolve(__dirname, 'examples/hands.html'),
         menu: resolve(__dirname, 'examples/menu.html'),
         workbench: resolve(__dirname, 'examples/workbench.html'),
+        mesh: resolve(__dirname, 'examples/mesh.html'),
       },
     },
   },

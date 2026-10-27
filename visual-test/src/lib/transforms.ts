@@ -40,6 +40,77 @@ export const xr50ToThree = (position: Vec3, quaternion: Quat) => {
   }
 }
 
+/** A detected plane as the bridge sends it: raw XR50 world frame, meters. */
+export interface XR50Plane {
+  id: string
+  /** Unit normal */
+  n: Vec3
+  /** Signed distance to the world origin along the normal */
+  d: number
+  /** Border polygon */
+  p: Vec3[]
+}
+
+/** A plane in the Three.js world the head rig lives in (same origin shift as the rig). */
+export interface WorldPlane {
+  id: string
+  normal: THREE.Vector3
+  border: THREE.Vector3[]
+}
+
+/** Raw XR50 world point → Three.js world: axis flip, then the rig's world offsets. */
+const xr50PointToWorld = ([x, y, z]: Vec3) => {
+  const s = useCalibrationProfilesStore.getState().settings
+  return new THREE.Vector3(x + s.headOffsetX, -y + s.headOffsetY + EYE_HEIGHT, -z + s.headOffsetZ)
+}
+
+/** Raw XR50 world positions (x, y, z, x, y, z, ...) → Three.js world, in place. */
+export const xr50PositionsToWorld = (positions: Float32Array) => {
+  const s = useCalibrationProfilesStore.getState().settings
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] += s.headOffsetX
+    positions[i + 1] = -positions[i + 1] + s.headOffsetY + EYE_HEIGHT
+    positions[i + 2] = -positions[i + 2] + s.headOffsetZ
+  }
+  return positions
+}
+
+/** One block of the room mesh (bridge recon source), Three.js world. */
+export interface MeshBlock {
+  key: string
+  positions: Float32Array
+  indices: Uint32Array
+}
+
+/**
+ * Decodes a mesh-block message (xvisio-rs `recon::map` wire format: u32 count, then per
+ * block i32x3 key, u32 vertex count, u32 index count, f32 positions, u32 indices).
+ * A block without triangles was removed.
+ */
+export const decodeMeshBlocks = (buffer: ArrayBuffer): MeshBlock[] => {
+  const u32 = new Uint32Array(buffer)
+  const i32 = new Int32Array(buffer)
+  const blocks: MeshBlock[] = []
+  let at = 1
+  for (let b = 0; b < u32[0]; b++) {
+    const key = `${i32[at]},${i32[at + 1]},${i32[at + 2]}`
+    const [n, m] = [u32[at + 3], u32[at + 4]]
+    at += 5
+    const positions = xr50PositionsToWorld(new Float32Array(buffer, at * 4, n * 3).slice())
+    at += n * 3
+    const indices = new Uint32Array(buffer, at * 4, m).slice()
+    at += m
+    blocks.push({ key, positions, indices })
+  }
+  return blocks
+}
+
+export const xr50PlaneToWorld = (plane: XR50Plane): WorldPlane => ({
+  id: plane.id,
+  normal: new THREE.Vector3(plane.n[0], -plane.n[1], -plane.n[2]),
+  border: plane.p.map(xr50PointToWorld),
+})
+
 /**
  * Tracker pose → camera rig pose: applies the tracker→head calibration, the
  * user's head offsets and lifts the SLAM origin to eye height.
@@ -71,14 +142,25 @@ const LEAP_HMD_MOUNT = new THREE.Quaternion().setFromRotationMatrix(
   ),
 )
 
-/** Builds the Leap → head frame transform for the current settings: points (mm → m) and directions. */
+/**
+ * The rig (render) frame is the real head frame rolled 180° about the view axis. The Esky warp
+ * is fitted to a panel Windows shows rotated 180°, and the XR50 conversion was tuned on the head
+ * against that, so world content is upright while anything measured in the real head frame (the
+ * Leap and its calibrated offset) must be rolled into the rig. Found on the head 2026-10-27:
+ * hands moved opposite on both screen axes with depth correct.
+ */
+const HEAD_TO_RIG = new THREE.Quaternion(0, 0, 1, 0)
+
+/** Builds the Leap → head (rig) transform for the current settings: points (mm → m) and directions. */
 export const leapToHead = (calibration: NorthStarCalibration) => {
   const s = useCalibrationProfilesStore.getState().settings
-  const rotation = degToQuat(s.handPitchOffset, s.handYawOffset, s.handRollOffset)
+  const rotation = HEAD_TO_RIG.clone()
+    .multiply(degToQuat(s.handPitchOffset, s.handYawOffset, s.handRollOffset))
     .multiply(calibration.leapRotation)
     .multiply(LEAP_HMD_MOUNT)
   const offset = calibration.leapTranslation.clone()
     .add(new THREE.Vector3(s.handOffsetX, s.handOffsetY, s.handOffsetZ))
+    .applyQuaternion(HEAD_TO_RIG)
   return {
     point: (posMm: Vec3) =>
       new THREE.Vector3().fromArray(posMm).multiplyScalar(0.001).applyQuaternion(rotation).add(offset),
@@ -89,12 +171,14 @@ export const leapToHead = (calibration: NorthStarCalibration) => {
 /** Inverse of `leapToHead`: head-frame points (m) and directions → Leap sensor frame (mm). */
 export const headToLeap = (calibration: NorthStarCalibration) => {
   const s = useCalibrationProfilesStore.getState().settings
-  const rotation = degToQuat(s.handPitchOffset, s.handYawOffset, s.handRollOffset)
+  const rotation = HEAD_TO_RIG.clone()
+    .multiply(degToQuat(s.handPitchOffset, s.handYawOffset, s.handRollOffset))
     .multiply(calibration.leapRotation)
     .multiply(LEAP_HMD_MOUNT)
     .invert()
   const offset = calibration.leapTranslation.clone()
     .add(new THREE.Vector3(s.handOffsetX, s.handOffsetY, s.handOffsetZ))
+    .applyQuaternion(HEAD_TO_RIG)
   return {
     point: (p: THREE.Vector3) => p.clone().sub(offset).applyQuaternion(rotation).multiplyScalar(1000),
     direction: (d: THREE.Vector3) => d.clone().applyQuaternion(rotation),

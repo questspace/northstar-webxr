@@ -66,12 +66,22 @@ impl Processes {
         Ok(())
     }
 
+    /// Kills a child and waits up to 5 s for it to exit. The table lock is released first,
+    /// so a child that will not die cannot block status requests or other actions.
     pub fn stop(&self, name: &str) {
-        if let Some(mut child) = self.children.lock().unwrap().remove(name) {
-            let _ = child.kill();
-            let _ = child.wait();
-            log::info!("stopped {name}");
+        let Some(mut child) = self.children.lock().unwrap().remove(name) else { return };
+        if let Err(e) = child.kill() {
+            log::warn!("kill {name}: {e}");
         }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Ok(Some(_)) = child.try_wait() {
+                log::info!("stopped {name}");
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        log::warn!("{name} (pid {}) did not exit within 5 s", child.id());
     }
 
     pub fn stop_all(&self) {

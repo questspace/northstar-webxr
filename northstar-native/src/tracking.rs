@@ -30,6 +30,8 @@ pub struct Tracking {
     pub head_rate: Mutex<u32>,
     /// Leap tracking events received, for diagnostics
     pub leap_frames: std::sync::atomic::AtomicU64,
+    /// Border polygons of the surfaces the XR50 detected (bridge SDK source), raw XR50 world, m
+    pub planes: Mutex<Vec<Vec<Vec3>>>,
 }
 
 pub type Shared = Arc<Tracking>;
@@ -104,6 +106,11 @@ pub fn spawn_xr50(shared: Shared) {
 pub fn spawn_xr50_client(shared: Shared, url: String) {
     #[derive(serde::Deserialize)]
     struct Msg { x: f64, y: f64, z: f64, q: [f64; 4], c: Option<f64>, tw: Option<f64> }
+    #[derive(serde::Deserialize)]
+    struct Plane { p: Vec<[f64; 3]> }
+    /// `{"type":"planes","planes":[...]}` from the bridge's SDK source (no pose fields).
+    #[derive(serde::Deserialize)]
+    struct Planes { planes: Vec<Plane> }
     let wall_ms = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() * 1e3);
     std::thread::Builder::new()
         .name("xr50-client".into())
@@ -117,6 +124,11 @@ pub fn spawn_xr50_client(shared: Shared, url: String) {
             let mut tick = Instant::now();
             while let Ok(message) = ws.read() {
                 let Ok(text) = message.to_text() else { continue };
+                if let Ok(Planes { planes }) = serde_json::from_str::<Planes>(text) {
+                    let to_vec = |p: &[f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
+                    *shared.planes.lock().unwrap() = planes.iter().map(|pl| pl.p.iter().map(to_vec).collect()).collect();
+                    continue;
+                }
                 let Ok(m) = serde_json::from_str::<Msg>(text) else { continue };
                 let unit = (m.q.iter().map(|v| v * v).sum::<f64>().sqrt() - 1.0).abs() < 0.1;
                 if unit && [m.x, m.y, m.z].iter().all(|v| v.abs() < 100.0) {

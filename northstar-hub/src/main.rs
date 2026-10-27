@@ -33,6 +33,10 @@ struct Hub {
     dev: Arc<watch::DevState>,
     /// Which WebXR page the kiosk opens (a KIOSK_PAGES name)
     page: Mutex<String>,
+    /// XR50 pose source: "edge" (on-device SLAM via xvisio-rs), "recon" (edge SLAM plus our own
+    /// room mesh and planes, `server --recon`) or "sdk" (host SLAM + planes via the official
+    /// SDK, `server --sdk`)
+    xr50_source: Mutex<String>,
 }
 
 impl Hub {
@@ -49,7 +53,10 @@ impl Hub {
         Ok(match name {
             "xr50" => Spec {
                 program: root.join("xvisio-rs/target/release/examples/server.exe"),
-                args: vec![],
+                args: match self.xr50_source.lock().unwrap().as_str() {
+                    "edge" => vec![],
+                    source => vec![format!("--{source}")],
+                },
                 cwd: root.join("xvisio-rs"),
             },
             "leap" => Spec {
@@ -187,6 +194,12 @@ impl Hub {
             "elevated": windows::elevated(),
             "processes": processes,
             "kioskPage": *self.page.lock().unwrap(),
+            "xr50Source": *self.xr50_source.lock().unwrap(),
+            "map": if *self.xr50_source.lock().unwrap() == "sdk" {
+                bridge_get("/map/status").and_then(|b| serde_json::from_str::<Value>(&b).ok())
+            } else {
+                None
+            },
             "kioskPages": KIOSK_PAGES.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
             "dev": {
                 "native": self.dev.enabled.load(Ordering::Relaxed),
@@ -217,6 +230,19 @@ impl Hub {
                 self.procs.stop_all();
                 Ok(json!({ "ok": true }))
             }
+            ["map", action @ ("save" | "load")] => {
+                let body = bridge_get(&format!("/map/{action}")).ok_or("the XR50 bridge is not running")?;
+                serde_json::from_str(&body).map_err(|e| e.to_string())
+            }
+            ["xr50", "source", source @ ("edge" | "recon" | "sdk")] => {
+                *self.xr50_source.lock().unwrap() = source.to_string();
+                // Clients reconnect on their own, so a running bridge just restarts in the new mode.
+                if self.procs.running("xr50") {
+                    self.procs.stop("xr50");
+                    self.start("xr50")?;
+                }
+                Ok(json!({ "ok": true, "message": format!("XR50 source: {source}") }))
+            }
             ["kiosk", "page", page] if KIOSK_PAGES.iter().any(|(n, _)| n == page) => {
                 *self.page.lock().unwrap() = page.to_string();
                 Ok(json!({ "ok": true, "message": format!("WebXR page: {page}") }))
@@ -233,6 +259,18 @@ impl Hub {
             _ => Err(format!("unknown action {path}")),
         }
     }
+}
+
+/// GET `path` on the XR50 bridge (localhost:8080); the JSON body, or None when it is not up.
+fn bridge_get(path: &str) -> Option<String> {
+    use std::io::{Read, Write};
+    let timeout = std::time::Duration::from_millis(500);
+    let mut s = std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], 8080)), timeout).ok()?;
+    s.set_read_timeout(Some(timeout)).ok()?;
+    write!(s, "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").ok()?;
+    let mut response = String::new();
+    s.read_to_string(&mut response).ok()?;
+    response.split_once("\r\n\r\n").map(|(_, body)| body.to_string())
 }
 
 /// True when something answers on localhost:`port` (the Vite server may be run outside the hub).
@@ -260,7 +298,7 @@ fn main() {
     let root = repo_root();
     log::info!("repo root: {}", root.display());
 
-    let hub = Arc::new(Hub { procs: Processes::new(root.clone()), dev: Arc::new(watch::DevState::default()), page: Mutex::new("headset".into()) });
+    let hub = Arc::new(Hub { procs: Processes::new(root.clone()), dev: Arc::new(watch::DevState::default()), page: Mutex::new("headset".into()), xr50_source: Mutex::new(std::env::var("NS_XR50_SOURCE").unwrap_or_else(|_| "edge".into())) });
 
     // Native hot reload: rebuild on source change, then relaunch on the headset.
     let relaunch = hub.clone();
