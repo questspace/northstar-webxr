@@ -12,6 +12,7 @@ import type { NorthStarCalibration } from '../lib/calibration'
 import { headPoseToRig, leapToHead } from '../lib/transforms'
 import { useTrackingStore, type HandData, type Vec3 } from '../stores/tracking'
 import { useCalibrationProfilesStore } from '../stores/calibrationProfiles'
+import { NorthStarEnvironment } from './environment'
 import { createWarpPass, eyeProjection, reprojection, warpParams, type WarpPass } from './optics'
 
 /**
@@ -32,7 +33,7 @@ const config: XRDeviceConfig = {
   name: 'Project NorthStar',
   controllerConfig: undefined,
   supportedSessionModes: ['inline', 'immersive-vr', 'immersive-ar'],
-  supportedFeatures: ['viewer', 'local', 'local-floor', 'unbounded', 'anchors', 'hit-test', 'hand-tracking'],
+  supportedFeatures: ['viewer', 'local', 'local-floor', 'unbounded', 'anchors', 'hit-test', 'hand-tracking', 'plane-detection', 'mesh-detection'],
   supportedFrameRates: [60, 120],
   isSystemKeyboardSupported: false,
   internalNominalFrameRate: 120,
@@ -213,6 +214,8 @@ export const installNorthStarXR = (calibration: NorthStarCalibration): NorthStar
 
   // Desktop Chromium exposes a native navigator.xr (OpenXR) that knows nothing
   // about this headset; the emulated runtime must replace it.
+  // Planes, meshes and hit tests come from the real room (XR50 bridge), not a synthetic one.
+  device.installSEM(NorthStarEnvironment)
   device.installRuntime({ forceInstall: true })
   const xr: NorthStarXR = {
     device,

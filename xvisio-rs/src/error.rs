@@ -26,6 +26,9 @@ pub enum XvisioError {
 
     #[error("Channel disconnected")]
     ChannelDisconnected,
+
+    #[error("Camera error: {0}")]
+    Camera(String),
 }
 
 /// Thread-safe last-error storage for the C FFI layer.

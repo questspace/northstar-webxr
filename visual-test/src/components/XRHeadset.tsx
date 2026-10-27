@@ -5,6 +5,11 @@ import { installNorthStarXR } from '../xr/runtime'
 import { Scene } from './Scene'
 import { HeadRig } from './HeadRig'
 import { Hands } from './Hands'
+import { Planes } from './Planes'
+import { RoomMesh } from './RoomMesh'
+
+/** `?hands=show` draws the tracked hands visibly, to check them against the real ones. */
+const showHands = new URLSearchParams(location.search).get('hands') === 'show'
 
 /**
  * Headset mode as a plain WebXR app: installs the NorthStar runtime, opens an
@@ -52,8 +57,10 @@ export function XRHeadset({ calibration }: { calibration: NorthStarCalibration }
   return (
     <>
       <Scene />
+      <Planes />
+      <RoomMesh />
       <HeadRig calibration={calibration}>
-        <Hands calibration={calibration} occluder />
+        <Hands calibration={calibration} occluder={!showHands} />
       </HeadRig>
     </>
   )

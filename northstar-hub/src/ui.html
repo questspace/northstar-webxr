@@ -43,6 +43,14 @@
   <section>
     <h2>Trackers</h2>
     <div id="trackers"></div>
+    <div class="row"><span>XR50 source</span>
+      <select id="xr50source" onchange="act('xr50/source/' + this.value)">
+        <option value="edge">Edge SLAM (on device, ~950 Hz)</option>
+        <option value="recon">Edge SLAM + room mesh and planes (ours)</option>
+        <option value="sdk">SDK: camera SLAM + planes (~500 Hz)</option>
+      </select></div>
+    <div class="row"><span>Room map <span id="map" class="muted"></span></span>
+      <span><button onclick="act('map/save')">Save room map</button> <button onclick="act('map/load')">Load room map</button></span></div>
     <div class="actions">
       <button onclick="act('leap-service/restart')">Restart Ultraleap service (UAC)</button>
       <button onclick="act('xr50/reset-usb')">Re-plug XR50 via USB (UAC)</button>
@@ -106,6 +114,14 @@ async function refresh() {
     `<button onclick="act('${k}/${s.processes[k] ? 'stop' : 'start'}')">${s.processes[k] ? 'stop' : 'start'}</button>`)).join('');
   if (s.kioskPages && $('page').options.length !== s.kioskPages.length) $('page').innerHTML = s.kioskPages.map((p) => `<option value="${p}">${p}</option>`).join('');
   if (document.activeElement !== $('page')) $('page').value = s.kioskPage;
+  if (document.activeElement !== $('xr50source')) $('xr50source').value = s.xr50Source;
+  const m = s.map, last = m && m.last;
+  $('map').textContent = !m ? '(SDK source only)'
+    : !last ? (m.saved ? '· saved map found, loads on start' : '· none saved yet')
+    : last.event === 'saved' ? `· saved, quality ${last.quality}/100${last.ok ? '' : ' (failed)'}`
+    : last.event === 'loaded' ? `· loaded, quality ${last.quality}/100`
+    : last.event === 'localized' ? `· relocalising: ${Math.round(last.share * 100)}% from the saved map`
+    : `· ${last.message || last.event}`;
   $('dev').textContent = `hot reload ${s.dev.native ? 'ON' : 'off'}${s.dev.building ? ' · building…' : ''}${s.dev.lastResult ? ' · ' + s.dev.lastResult : ''}`;
   $('logs').innerHTML = Object.entries(s.logs).filter(([, v]) => v).map(([k, v]) => `<div class="muted">${k}</div><pre>${v.replace(/</g, '&lt;')}</pre>`).join('');
 }

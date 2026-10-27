@@ -57,3 +57,11 @@ project-esky-unity/
 libxvisio-source/
 xvisio-sdk/
 xvisio-slam-driver/
+# Saved room maps (xvisio-rs server --sdk)
+maps/
+# Device calibration dumped from the XR50 (xvsdk-bridge --dump-calibration)
+calibration/
+# Reconstruction output (xvisio-rs --example reconstruct)
+visual-test/public/recon/
+visual-test/dist/recon/
+*.tsbuildinfo

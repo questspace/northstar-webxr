@@ -83,6 +83,8 @@ pub struct Device {
     uuid: String,
     version: String,
     features: Features,
+    /// Start the fisheye cameras together with SLAM (`start_slam_with_cameras`).
+    cameras: bool,
 }
 
 impl Device {
@@ -117,6 +119,7 @@ impl Device {
             uuid,
             version,
             features,
+            cameras: false,
         })
     }
 
@@ -151,6 +154,7 @@ impl Device {
             uuid,
             version,
             features,
+            cameras: false,
         })
     }
 
@@ -175,6 +179,15 @@ impl Device {
             .as_ref()
             .ok_or_else(|| XvisioError::HidCommand("Device handle consumed by SLAM".into()))?
             .transaction(cmd)
+    }
+
+    /// Start SLAM and the stereo fisheye cameras together. The images come over the XR50's
+    /// standard UVC interface (640x800 at 100 fps, left above right) and are read with
+    /// [`crate::camera::StereoCamera`] (feature `camera`). Verified on Windows 2026-10-26:
+    /// edge SLAM keeps its ~950 Hz with the cameras running.
+    pub fn start_slam_with_cameras(&mut self, mode: SlamMode) -> Result<SlamStream> {
+        self.cameras = true;
+        self.start_slam(mode)
     }
 
     /// Start SLAM streaming in the specified mode.
@@ -212,6 +225,22 @@ impl Device {
         }
     }
 
+    /// Start the full-rate IMU stream (~1 kHz accelerometer, gyroscope, magnetometer),
+    /// read with [`SlamStream::recv_imu_timeout`] / [`SlamStream::try_recv_imu`].
+    ///
+    /// The firmware runs one stream at a time: starting the IMU stops edge SLAM and
+    /// starting SLAM stops the IMU (edge mode sends poses; the IMU feeds host-side SLAM).
+    pub fn start_imu(&mut self) -> Result<SlamStream> {
+        let hid = self
+            .hid
+            .as_ref()
+            .ok_or_else(|| XvisioError::HidCommand("Device handle already consumed".into()))?;
+        hid.imu_stream(true)?;
+        let api = create_hid_api()?;
+        let device = api.open_path(&self.device_path)?;
+        SlamStream::start_hidapi(device, api)
+    }
+
     /// hidapi-based SLAM start (Windows/Linux, optional on macOS).
     fn start_slam_hidapi(&mut self, edge: bool, embedded_algo: bool) -> Result<SlamStream> {
         // On macOS, configure frequently causes USB re-enumeration.
@@ -220,9 +249,9 @@ impl Device {
             return self.start_slam_hidapi_macos(edge, embedded_algo);
         }
 
-        let uvc_mode = Self::read_env_u8("XVISIO_UVC_MODE", 0);
+        let uvc_mode = if self.cameras { 1 } else { Self::read_env_u8("XVISIO_UVC_MODE", 0) };
         let rotation_enabled = Self::read_env_bool("XVISIO_ROTATION_ENABLED", true);
-        let enable_stereo_init = Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
+        let enable_stereo_init = self.cameras || Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
 
         debug_file(&format!(
             "start_slam_hidapi: begin uvcMode={} rotationEnabled={} stereoInit={}",
@@ -260,9 +289,9 @@ impl Device {
     }
 
     fn start_slam_hidapi_macos(&mut self, edge: bool, embedded_algo: bool) -> Result<SlamStream> {
-        let uvc_mode = Self::read_env_u8("XVISIO_UVC_MODE", 1);
+        let uvc_mode = if self.cameras { 1 } else { Self::read_env_u8("XVISIO_UVC_MODE", 1) };
         let rotation_enabled = Self::read_env_bool("XVISIO_ROTATION_ENABLED", true);
-        let enable_stereo_init = Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
+        let enable_stereo_init = self.cameras || Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
         let reopen_after_config = Self::read_env_bool("XVISIO_REOPEN_AFTER_CONFIG", true);
         let reconnect_attempts = 40usize;
         let reconnect_delay = std::time::Duration::from_millis(100);
@@ -450,11 +479,11 @@ impl Device {
         // Keep macOS defaults aligned with the known-good Windows/Linux path:
         // configure(edge=1, uvcMode=0, embeddedAlgo=0), then edge stream
         // with rotationEnabled=true.
-        let uvc_mode = Self::read_env_u8("XVISIO_UVC_MODE", 0);
+        let uvc_mode = if self.cameras { 1 } else { Self::read_env_u8("XVISIO_UVC_MODE", 0) };
         let rotation_enabled = Self::read_env_bool("XVISIO_ROTATION_ENABLED", true);
         let claim_all_interfaces = Self::read_env_bool("XVISIO_CLAIM_ALL_INTERFACES", false);
         let precondition_cycles = Self::read_env_u8("XVISIO_PRECONDITION_CYCLES", 0) as usize;
-        let enable_stereo_init = Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
+        let enable_stereo_init = self.cameras || Self::read_env_bool("XVISIO_ENABLE_STEREO_INIT", false);
         let reopen_after_config = Self::read_env_bool("XVISIO_REOPEN_AFTER_CONFIG", true);
         let reopen_after_edge_start = Self::read_env_bool("XVISIO_REOPEN_AFTER_EDGE_START", false);
         let allow_detach_fallback = Self::read_env_bool("XVISIO_ALLOW_DETACH_FALLBACK", true);

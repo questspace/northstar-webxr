@@ -23,16 +23,23 @@ pub struct Pose {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ImuData {
-    /// Accelerometer [x, y, z] in g (hypothesis: scale = 2^-14 per g).
+    /// Device clock in microseconds, the same clock as `Pose::timestamp_us`.
+    pub timestamp_us: u32,
+    /// Accelerometer [x, y, z] in the IMU frame, m/s².
     pub accelerometer: [f64; 3],
-    /// Gyroscope [x, y, z] in scaled units (hypothesis: rad/s).
+    /// Gyroscope [x, y, z] in the IMU frame, rad/s.
     pub gyroscope: [f64; 3],
+    /// Third triad of the IMU report: slowly varying, magnitude ~78 at the desk, most
+    /// likely a magnetometer in µT (unverified).
+    pub magnetometer: [f64; 3],
 }
 
 /// Full SLAM sample including pose, optional IMU, and raw extended data.
 #[derive(Debug, Clone)]
 pub struct SlamSample {
     pub pose: Pose,
+    /// Latest IMU sample when the pose arrived: None in edge SLAM, which runs without the
+    /// IMU stream (see `Device::start_imu`).
     pub imu: Option<ImuData>,
     /// Raw bytes [37..62] from the SLAM packet for user analysis.
     pub raw_extended: [u8; 26],

@@ -26,9 +26,40 @@ pub const CMD_CONFIGURE: &[u8] = &[0x19, 0x95];
 pub const CMD_EDGE_STREAM: &[u8] = &[0xA2, 0x33];
 pub const CMD_STEREO_CAMERA_INIT: &[u8] = &[0xFE, 0x20, 0x21];
 pub const CMD_STEREO_CAMERA_START: &[u8] = &[0xFE, 0x20, 0x22];
+/// IMU stream on/off (`[0xBD, 0xDF, 0x01 | 0x00]`), found in the official SDK's
+/// `xslam-hid-sdk.dll` next to the edge-stream command; starts `01 BD DF` reports at ~1 kHz.
+pub const CMD_IMU_STREAM: &[u8] = &[0xBD, 0xDF];
 
 // -- SLAM packet header echo --
 pub const SLAM_HEADER: [u8; 3] = [0x01, 0xA2, 0x33];
+pub const IMU_HEADER: [u8; 3] = [0x01, 0xBD, 0xDF];
+
+/// Standard gravity, for the accelerometer's g → m/s².
+const G: f64 = 9.80665;
+
+/// Start or stop the IMU stream.
+pub fn build_imu_stream_cmd(start: bool) -> [u8; REPORT_SIZE] {
+    build_command(&[CMD_IMU_STREAM[0], CMD_IMU_STREAM[1], start as u8])
+}
+
+/// Parse an IMU report (verified against the official SDK on 2026-10-26):
+/// - `[0..3]`: `01 BD DF`, `[3..7]`: device timestamp (µs, u32 LE)
+/// - `[15..27]`: accelerometer x, y, z (f32 LE, g)
+/// - `[27..39]`: gyroscope x, y, z (f32 LE, rad/s)
+/// - `[39..51]`: magnetometer x, y, z (f32 LE, likely µT)
+pub fn parse_imu_packet(data: &[u8]) -> Option<ImuData> {
+    if data.len() < 51 || data[..3] != IMU_HEADER {
+        return None;
+    }
+    let f = |o: usize| f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]) as f64;
+    let triad = |o: usize, scale: f64| [f(o) * scale, f(o + 4) * scale, f(o + 8) * scale];
+    Some(ImuData {
+        timestamp_us: u32::from_le_bytes([data[3], data[4], data[5], data[6]]),
+        accelerometer: triad(15, G),
+        gyroscope: triad(27, 1.0),
+        magnetometer: triad(39, 1.0),
+    })
+}
 
 /// Build a 63-byte HID command buffer.
 /// Format: [0x02, cmd_bytes..., 0x00 padding...]
@@ -363,18 +394,9 @@ pub fn parse_slam_packet(data: &[u8], epoch: Instant) -> Option<SlamSample> {
     let mut raw_extended = [0u8; 26];
     raw_extended.copy_from_slice(&data[37..63]);
 
-    // Parse IMU data (hypothesis from protocol analysis)
-    let accel_x = i16::from_le_bytes([data[37], data[38]]) as f64 * SCALE;
-    let accel_y = i16::from_le_bytes([data[39], data[40]]) as f64 * SCALE;
-    let accel_z = i16::from_le_bytes([data[41], data[42]]) as f64 * SCALE;
-    let gyro_x = i16::from_le_bytes([data[43], data[44]]) as f64 * SCALE;
-    let gyro_y = i16::from_le_bytes([data[45], data[46]]) as f64 * SCALE;
-    let gyro_z = i16::from_le_bytes([data[47], data[48]]) as f64 * SCALE;
-
-    let imu = Some(ImuData {
-        accelerometer: [accel_x, accel_y, accel_z],
-        gyroscope: [gyro_x, gyro_y, gyro_z],
-    });
+    // The IMU comes from its own report stream (`parse_imu_packet`); the reader attaches
+    // the latest sample. (Bytes 39/41/43 here hold a coarse 1/128 g accelerometer copy.)
+    let imu = None;
 
     // Confidence from bytes [57..58] scaled
     let confidence_raw = i16::from_le_bytes([data[57], data[58]]) as f64 * SCALE;
@@ -468,5 +490,20 @@ mod tests {
             + sample.pose.quaternion[3] * sample.pose.quaternion[3])
             .sqrt();
         assert!((qn - 1.0).abs() < 0.05);
+    }
+
+    /// A real `01 BD DF` report captured next to the official SDK, which printed
+    /// Accel(-0.29, 9.68, -1.31) m/s² for the same still device.
+    #[test]
+    fn test_parse_imu_packet() {
+        let hex = "01bddfc2f4f30000000000000000009311783f5c3212bd69732fbe277251bb835af43b6fa18b3b145b00c2ec1781423833014233d3a0430000000001000000";
+        let data: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+        let imu = parse_imu_packet(&data).expect("IMU report");
+        assert_eq!(imu.timestamp_us, 15987906);
+        let g: f64 = imu.accelerometer.iter().map(|a| a * a).sum::<f64>().sqrt();
+        assert!((g - 9.66).abs() < 0.1, "|accel| = {g}");
+        assert!(imu.gyroscope.iter().all(|w| w.abs() < 0.02), "still device");
+        assert!(parse_imu_packet(&data[..40]).is_none());
+        assert!(parse_slam_packet(&data, std::time::Instant::now()).is_none());
     }
 }

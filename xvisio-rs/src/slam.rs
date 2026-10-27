@@ -1,5 +1,5 @@
 use crate::protocol;
-use crate::types::SlamSample;
+use crate::types::{ImuData, SlamSample};
 use crate::{Result, XvisioError};
 use crossbeam_channel::{Receiver, Sender};
 use std::io::Write;
@@ -22,6 +22,7 @@ fn debug_file(message: &str) {
 /// reads HID interrupt reports via hidapi (Windows/Linux) or rusb (macOS).
 pub struct SlamStream {
     receiver: Receiver<SlamSample>,
+    imu_receiver: Receiver<ImuData>,
     stop_flag: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     /// Prevents hid_exit() on macOS while the reader thread is using the HidDevice.
@@ -29,52 +30,55 @@ pub struct SlamStream {
     _api: Option<hidapi::HidApi>,
 }
 
+/// Where the reader thread delivers poses and IMU samples. Each pose carries the latest
+/// IMU sample; the IMU channel gets every one (~1 kHz).
+struct Senders {
+    slam: Sender<SlamSample>,
+    imu: Sender<ImuData>,
+    latest_imu: Option<ImuData>,
+}
+
+impl Senders {
+    /// Routes one input report; stops the reader when the stream's owner is gone.
+    fn dispatch(&mut self, data: &[u8], epoch: Instant, stop_flag: &Arc<AtomicBool>) {
+        if let Some(imu) = protocol::parse_imu_packet(data) {
+            self.latest_imu = Some(imu);
+            let _ = self.imu.try_send(imu); // full: nobody reads the IMU, drop it
+            return;
+        }
+        let Some(mut sample) = protocol::parse_slam_packet(data, epoch) else { return };
+        sample.imu = self.latest_imu;
+        if let Err(crossbeam_channel::TrySendError::Disconnected(_)) = self.slam.try_send(sample) {
+            log::info!("SLAM channel disconnected, stopping reader");
+            stop_flag.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 impl SlamStream {
     /// Start the SLAM streaming thread using hidapi (Windows/Linux).
-    pub(crate) fn start_hidapi(
-        device: hidapi::HidDevice,
-        api: hidapi::HidApi,
-    ) -> Result<SlamStream> {
-        let (sender, receiver) = crossbeam_channel::bounded(256);
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop_clone = stop_flag.clone();
-
-        let thread = std::thread::Builder::new()
-            .name("xvisio-slam".into())
-            .spawn(move || {
-                slam_reader_hidapi(device, sender, stop_clone);
-            })
-            .map_err(|e| XvisioError::HidCommand(format!("Failed to spawn SLAM thread: {}", e)))?;
-
-        Ok(SlamStream {
-            receiver,
-            stop_flag,
-            thread: Some(thread),
-            _api: Some(api),
-        })
+    pub(crate) fn start_hidapi(device: hidapi::HidDevice, api: hidapi::HidApi) -> Result<SlamStream> {
+        Self::spawn(Some(api), move |senders, stop| slam_reader_hidapi(device, senders, stop))
     }
 
     /// Start the SLAM streaming thread using rusb (macOS).
-    pub(crate) fn start_rusb(
-        handle: rusb::DeviceHandle<rusb::GlobalContext>,
-    ) -> Result<SlamStream> {
-        let (sender, receiver) = crossbeam_channel::bounded(256);
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop_clone = stop_flag.clone();
+    pub(crate) fn start_rusb(handle: rusb::DeviceHandle<rusb::GlobalContext>) -> Result<SlamStream> {
+        Self::spawn(None, move |senders, stop| slam_reader_rusb(handle, senders, stop))
+    }
 
+    fn spawn(
+        api: Option<hidapi::HidApi>,
+        reader: impl FnOnce(Senders, Arc<AtomicBool>) + Send + 'static,
+    ) -> Result<SlamStream> {
+        let (slam, receiver) = crossbeam_channel::bounded(256);
+        let (imu, imu_receiver) = crossbeam_channel::bounded(1024);
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop = stop_flag.clone();
         let thread = std::thread::Builder::new()
             .name("xvisio-slam".into())
-            .spawn(move || {
-                slam_reader_rusb(handle, sender, stop_clone);
-            })
+            .spawn(move || reader(Senders { slam, imu, latest_imu: None }, stop))
             .map_err(|e| XvisioError::HidCommand(format!("Failed to spawn SLAM thread: {}", e)))?;
-
-        Ok(SlamStream {
-            receiver,
-            stop_flag,
-            thread: Some(thread),
-            _api: None,
-        })
+        Ok(SlamStream { receiver, imu_receiver, stop_flag, thread: Some(thread), _api: api })
     }
 
     /// Receive the next SLAM sample (blocks until available).
@@ -90,6 +94,20 @@ impl SlamStream {
     /// Receive a SLAM sample with a timeout.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<SlamSample> {
         self.receiver.recv_timeout(timeout).map_err(|e| match e {
+            crossbeam_channel::RecvTimeoutError::Timeout => XvisioError::Timeout,
+            crossbeam_channel::RecvTimeoutError::Disconnected => XvisioError::StreamStopped,
+        })
+    }
+
+    /// Try to receive the next IMU sample (~1 kHz) without blocking. Samples queue up to
+    /// about a second; older ones are dropped when nobody reads them.
+    pub fn try_recv_imu(&self) -> Option<ImuData> {
+        self.imu_receiver.try_recv().ok()
+    }
+
+    /// Receive the next IMU sample with a timeout.
+    pub fn recv_imu_timeout(&self, timeout: Duration) -> Result<ImuData> {
+        self.imu_receiver.recv_timeout(timeout).map_err(|e| match e {
             crossbeam_channel::RecvTimeoutError::Timeout => XvisioError::Timeout,
             crossbeam_channel::RecvTimeoutError::Disconnected => XvisioError::StreamStopped,
         })
@@ -122,7 +140,7 @@ impl Drop for SlamStream {
 /// hidapi-based SLAM reader (Windows/Linux).
 fn slam_reader_hidapi(
     device: hidapi::HidDevice,
-    sender: Sender<SlamSample>,
+    mut senders: Senders,
     stop_flag: Arc<AtomicBool>,
 ) {
     let epoch = Instant::now();
@@ -219,14 +237,14 @@ fn slam_reader_hidapi(
                 data[3]
             );
         }
-        dispatch_sample(data, epoch, &sender, &stop_flag);
+        senders.dispatch(data, epoch, &stop_flag);
     }
 }
 
 /// rusb-based SLAM reader (macOS).
 fn slam_reader_rusb(
     handle: rusb::DeviceHandle<rusb::GlobalContext>,
-    sender: Sender<SlamSample>,
+    mut senders: Senders,
     stop_flag: Arc<AtomicBool>,
 ) {
     let epoch = Instant::now();
@@ -311,7 +329,7 @@ fn slam_reader_rusb(
                     buf[2]
                 );
             }
-            dispatch_sample(&buf[..total], epoch, &sender, &stop_flag);
+            senders.dispatch(&buf[..total], epoch, &stop_flag);
         } else if len >= protocol::REPORT_SIZE && buf[0] == protocol::SLAM_HEADER[0] {
             // Report ID is included (some libusb configurations)
             if debug_raw && debug_packets < 20 {
@@ -325,7 +343,7 @@ fn slam_reader_rusb(
                     buf[2]
                 );
             }
-            dispatch_sample(&buf[..len], epoch, &sender, &stop_flag);
+            senders.dispatch(&buf[..len], epoch, &stop_flag);
         } else if debug_raw && debug_packets < 20 {
             debug_packets += 1;
             let b0 = if len > 0 { buf[0] } else { 0 };
@@ -345,26 +363,4 @@ fn slam_reader_rusb(
     // Release interface — ignore errors (device may already be disconnected)
     handle.release_interface(protocol::HID_INTERFACE as u8).ok();
     log::info!("SLAM reader stopped");
-}
-
-/// Parse and send a SLAM sample to the channel.
-fn dispatch_sample(
-    data: &[u8],
-    epoch: Instant,
-    sender: &Sender<SlamSample>,
-    stop_flag: &Arc<AtomicBool>,
-) {
-    if let Some(sample) = protocol::parse_slam_packet(data, epoch) {
-        if let Err(e) = sender.try_send(sample) {
-            match e {
-                crossbeam_channel::TrySendError::Full(_) => {
-                    log::trace!("SLAM channel full, dropping sample");
-                }
-                crossbeam_channel::TrySendError::Disconnected(_) => {
-                    log::info!("SLAM channel disconnected, stopping reader");
-                    stop_flag.store(true, Ordering::Relaxed);
-                }
-            }
-        }
-    }
 }

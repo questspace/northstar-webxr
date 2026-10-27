@@ -101,6 +101,15 @@ impl HidTransport {
         self.configure_with_uvc(edge, 0, embedded_algo)
     }
 
+    /// Start or stop the ~1 kHz IMU report stream. Write-only, like the stream commands.
+    pub fn imu_stream(&self, start: bool) -> Result<()> {
+        self.device
+            .write(&protocol::build_imu_stream_cmd(start))
+            .map_err(|e| XvisioError::HidCommand(format!("IMU stream cmd failed: {}", e)))?;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        Ok(())
+    }
+
     /// Send the edge stream command with explicit parameters.
     pub fn edge_stream_with_params(
         &self,

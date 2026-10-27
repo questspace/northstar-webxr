@@ -15,7 +15,7 @@ on the head), **next**, **later**.
 | 2 | Hands as the interface | built, hand-feel to check |
 | 3 | Seeing Spaces workbench | built, to check on the head |
 | 4 | QuestSpace pilot | later, blocked on 5 |
-| 5 | The whole XR50 on every desktop | **next** |
+| 5 | The whole XR50 on every desktop | **in progress**: IMU, camera SLAM, planes on Windows |
 | 6 | Reliability of the headset link | next (hardware: own power supply) |
 
 Next up, in order: **6** (power the headset separately, confirm the recovery path), then
@@ -81,6 +81,24 @@ Today the Rust driver (`xvisio-rs`) speaks the XR50's HID control channel and re
 relocalisation, and the "mixed" mode that fuses them. This unit reports only
 EDGE_MODE | MIXED_MODE | STEREO, so depth is host-side stereo. Windows must support all of
 it first; Linux and macOS follow.
+
+**Done (2026-10-26):** the official Windows SDK (XVSDK 3.2.0) runs every camera feature on
+this headset as wired, with stock drivers (`docs/XR50_OFFICIAL_SDK.md`). `xvisio-rs` reads
+the full-rate IMU (`Device::start_imu`; the firmware runs edge SLAM or the IMU, one at a
+time). The XR50 bridge has an SDK source (`server --sdk`, hub *XR50 source*) that brings
+camera SLAM and **stereo plane detection** into the WebXR runtime and the native app.
+The camera turned out to be plain UVC, and `xvisio-rs` now reads it itself
+(`start_slam_with_cameras` + `camera::StereoCamera`, feature `camera`), alongside edge SLAM:
+steps 1-2 below are done on Windows (to verify on Linux/macOS). Room maps (step 3) work
+through the SDK source: save once, auto-loaded on start, world frame restored to ~2 mm.
+Step 4 (depth) is done in Rust, cross-platform: `xvisio::stereo` (census + SGM), 1.01 m
+measured at 1.0 m, ~28 maps/s. Step 5 runs offline and live in Rust (`xvisio::recon`: TSDF,
+Surface Nets mesh, horizontal/vertical planes; mounting and camera delay fitted on recorded
+data) and is in the stack: hub *XR50 source* "Edge SLAM + room mesh and planes" (`server
+--recon`) streams mesh blocks and planes; WebXR apps get them as `plane-detection`,
+`mesh-detection` and `hit-test` (IWER environment module, `src/xr/environment.ts`), the
+headset view uses the mesh as an occluder (`?mesh` shows it), the native app draws the
+planes. Next: our own map format; learned stereo depth would extend range and coverage.
 
 1. **Capture the protocol, not guess it.** Run the official Windows DLL (`xslam_sdk.dll`,
    mangled exports in `xslam-headers/xslam_sdk.h`) under USBPcap while calling each feature

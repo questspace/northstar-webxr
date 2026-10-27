@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { MeshBlock, WorldPlane } from '../lib/transforms'
 
 export type Vec3 = [number, number, number]
 /** [qx, qy, qz, qw] */
@@ -32,7 +33,7 @@ export interface HandData {
   fingerWidth: number[]
 }
 
-interface TrackingState {
+export interface TrackingState {
   // Connection states
   xr50Connected: boolean
   xr50Stalled: boolean
@@ -47,6 +48,11 @@ interface TrackingState {
   leftHand: HandData | null
   rightHand: HandData | null
 
+  // Surfaces detected by the XR50 (bridge SDK source only), Three.js world
+  planes: WorldPlane[]
+  // Room mesh by block (bridge recon source), Three.js world
+  meshBlocks: Map<string, MeshBlock>
+
   // Telemetry
   xr50Fps: number
   leapFps: number
@@ -59,6 +65,10 @@ interface TrackingState {
   setLeapStatus: (status: string) => void
   setHeadPose: (pose: HeadPose) => void
   setHands: (left: HandData | null, right: HandData | null) => void
+  setPlanes: (planes: WorldPlane[]) => void
+  /** Replaces the given blocks; blocks without triangles are removed. */
+  updateMeshBlocks: (blocks: MeshBlock[]) => void
+  clearEnvironment: () => void
   setXR50Fps: (fps: number) => void
   setLeapFps: (fps: number) => void
 }
@@ -72,6 +82,8 @@ export const useTrackingStore = create<TrackingState>()((set) => ({
   headPose: { position: [0, 0, 0], quaternion: [0, 0, 0, 1], confidence: 0, timestamp: 0, receivedAt: 0 },
   leftHand: null,
   rightHand: null,
+  planes: [],
+  meshBlocks: new Map(),
   xr50Fps: 0,
   leapFps: 0,
 
@@ -82,6 +94,16 @@ export const useTrackingStore = create<TrackingState>()((set) => ({
   setLeapStatus: (status) => set({ leapStatus: status }),
   setHeadPose: (pose) => set({ headPose: pose }),
   setHands: (left, right) => set({ leftHand: left, rightHand: right }),
+  setPlanes: (planes) => set({ planes }),
+  updateMeshBlocks: (blocks) => set((s) => {
+    const meshBlocks = new Map(s.meshBlocks)
+    for (const b of blocks) {
+      if (b.indices.length) meshBlocks.set(b.key, b)
+      else meshBlocks.delete(b.key)
+    }
+    return { meshBlocks }
+  }),
+  clearEnvironment: () => set({ planes: [], meshBlocks: new Map() }),
   setXR50Fps: (fps) => set({ xr50Fps: fps }),
   setLeapFps: (fps) => set({ leapFps: fps }),
 }))

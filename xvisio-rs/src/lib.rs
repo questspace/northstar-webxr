@@ -20,12 +20,16 @@
 //! }
 //! ```
 
+#[cfg(feature = "camera")]
+pub mod camera;
 pub mod device;
 pub mod error;
 pub mod ffi;
 pub mod hid;
 pub mod protocol;
+pub mod recon;
 pub mod slam;
+pub mod stereo;
 pub mod types;
 
 pub use device::Device;

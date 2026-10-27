@@ -1,7 +1,13 @@
 import { useEffect } from 'react'
 import { useTrackingStore, type Quat, type Vec3 } from '../stores/tracking'
 import { createPoseFilter } from '../lib/one-euro-filter'
-import { xr50ToThree } from '../lib/transforms'
+import { decodeMeshBlocks, xr50PlaneToWorld, xr50ToThree, type XR50Plane } from '../lib/transforms'
+
+/** Plane updates from the bridge's SDK or recon source, in the raw XR50 world frame. */
+interface PlanesMessage {
+  type: 'planes'
+  planes: XR50Plane[]
+}
 
 const XR50_WS_URL = 'ws://localhost:8080'
 const XR50_HTTP_URL = 'http://localhost:8080'
@@ -68,6 +74,7 @@ export const connectXR50 = () => {
 
     store.setXR50Status('Connecting to XR50 bridge')
     const socket = new WebSocket(XR50_WS_URL)
+    socket.binaryType = 'arraybuffer'
     ws = socket
 
     // Reset the stall watchdog on every frame; if it ever fires, the stream
@@ -86,6 +93,8 @@ export const connectXR50 = () => {
     socket.onopen = () => {
       const next = useTrackingStore.getState()
       next.setXR50Connected(true)
+      // The bridge resends its whole environment to a new client.
+      next.clearEnvironment()
       next.setXR50Stalled(false)
       stalled = false
       next.setXR50Status('XR50 connected')
@@ -98,8 +107,18 @@ export const connectXR50 = () => {
         stalled = false
         useTrackingStore.getState().setXR50Stalled(false)
       }
+      // Binary messages are room-mesh blocks (recon source).
+      if (e.data instanceof ArrayBuffer) {
+        useTrackingStore.getState().updateMeshBlocks(decodeMeshBlocks(e.data))
+        return
+      }
       try {
-        const raw = JSON.parse(e.data) as {
+        const message = JSON.parse(e.data)
+        if (message.type === 'planes') {
+          useTrackingStore.getState().setPlanes((message as PlanesMessage).planes.map(xr50PlaneToWorld))
+          return
+        }
+        const raw = message as {
           x: number; y: number; z: number
           q: Quat
           c?: number

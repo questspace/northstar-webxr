@@ -171,6 +171,21 @@ fn buttons() -> Vec<Button> {
 }
 
 impl App {
+    /// Outlines of the detected surfaces: raw XR50 world → render world, the same axis flip
+    /// and eye-height lift as the head pose (`xr50_to_three` + `rig`).
+    fn planes(&self) -> Vec<Instance> {
+        let world = |p: Vec3| Vec3::new(p.x, -p.y + EYE_HEIGHT, -p.z);
+        let color = Vec3::new(0.23, 0.42, 0.48);
+        self.tracking
+            .planes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|border| border.len() >= 3)
+            .flat_map(|border| (0..border.len()).map(move |i| segment(world(border[i]), world(border[(i + 1) % border.len()]), color)))
+            .collect()
+    }
+
     fn head(&self) -> (Pose, Option<Instant>, f64) {
         match *self.tracking.head.lock().unwrap() {
             Some(s) => (s.pose, Some(s.received), s.confidence),
@@ -193,6 +208,7 @@ impl App {
             actions = self.interaction.update(&hands);
             let mut draws = self.interaction.draws(&hands, |_| false);
             draws.extend(scene());
+            draws.push((Kind::Line, self.planes()));
             // Freshest pose for the warp: with ~1 ms pose age this is late latching.
             let display = self.head().0.rotation;
             let warp = WarpSettings {

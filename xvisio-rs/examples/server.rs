@@ -6,7 +6,11 @@
 //!   - Serves visual-test/dist/ static files on HTTP
 //!
 //! Usage:
-//!   cargo run --release --example server
+//!   cargo run --release --example server            # edge SLAM
+//!   cargo run --release --example server -- --sdk   # official SDK: camera SLAM, planes, maps
+//!   cargo run --release --features camera --example server -- --recon
+//!       # edge SLAM + our own room map: mesh blocks (binary messages, `xvisio::recon::map`
+//!       # wire format) and planes (same JSON as the SDK source)
 //!   Open http://localhost:8080
 
 use std::io::{Read as _, Write as _};
@@ -36,10 +40,23 @@ fn main() {
     let slam_running = Arc::new(AtomicBool::new(true));
     let slam_stop = slam_running.clone();
 
+    // Source: `--sdk` / `--recon` or XR50_SOURCE=sdk|recon; default on-device edge SLAM.
+    let source = |name: &str| {
+        std::env::args().any(|a| a == format!("--{name}")) || std::env::var("XR50_SOURCE").is_ok_and(|v| v.eq_ignore_ascii_case(name))
+    };
+    let (sdk, recon) = (source("sdk"), source("recon"));
+    let poses = recon.then(xvisio::recon::PoseHistory::default);
+    if let Some(poses) = &poses {
+        start_mapping(clients.clone(), poses.clone(), slam_running.clone());
+    }
     let slam_thread = std::thread::Builder::new()
         .name("xr50-slam".into())
         .spawn(move || {
-            slam_loop(slam_clients, slam_stop);
+            if sdk {
+                sdk_loop(slam_clients, slam_stop)
+            } else {
+                slam_loop(slam_clients, slam_stop, poses)
+            }
         })
         .expect("Failed to spawn SLAM thread");
 
@@ -137,6 +154,16 @@ fn handle_http(mut stream: TcpStream, request_str: &str, dist_dir: &Path) {
         .unwrap_or("/");
 
     let url_path = path.split('?').next().unwrap_or(path);
+    if let Some(action) = url_path.strip_prefix("/map/") {
+        let body = map_action(action);
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        return;
+    }
     let url_path = if url_path == "/" {
         "/index.html"
     } else {
@@ -199,7 +226,9 @@ fn handle_http(mut stream: TcpStream, request_str: &str, dist_dir: &Path) {
 }
 
 /// SLAM streaming loop — reads XR50 poses and broadcasts JSON to WebSocket clients.
-fn slam_loop(clients: Clients, running: Arc<AtomicBool>) {
+/// Edge SLAM to every client. With `poses` (the recon source) the cameras stream too and
+/// every pose also goes to the mapper.
+fn slam_loop(clients: Clients, running: Arc<AtomicBool>, poses: Option<xvisio::recon::PoseHistory>) {
     // A USB re-enumeration (selective suspend, cable) can hand back a device whose
     // control queries return an empty identity / zero features; SLAM from that
     // state streams garbage, so keep reopening until it answers (a re-plug clears it).
@@ -239,7 +268,8 @@ fn slam_loop(clients: Clients, running: Arc<AtomicBool>) {
         }
         degraded_attempts = 0;
 
-        let stream = match device.start_slam(xvisio::SlamMode::Edge) {
+        let started = if poses.is_some() { device.start_slam_with_cameras(xvisio::SlamMode::Edge) } else { device.start_slam(xvisio::SlamMode::Edge) };
+        let stream = match started {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[XR50] Failed to start SLAM: {}", e);
@@ -315,6 +345,9 @@ fn slam_loop(clients: Clients, running: Arc<AtomicBool>) {
 
             last_sample = std::time::Instant::now();
             count += 1;
+            if let Some(poses) = &poses {
+                poses.push(sample.pose);
+            }
             let now = std::time::Instant::now();
 
             // Per-sample rotation diagnostics (runs at full sample rate so a
@@ -355,48 +388,9 @@ fn slam_loop(clients: Clients, running: Arc<AtomicBool>) {
                     last_broadcast = now;
                 }
 
-                // Raw XR50 pose in the device's own world frame (meters, [qx,qy,qz,qw]).
-                // Frame conversion is the client's job; Euler stays for the HUD/legacy readers.
-                // "tw" is wall-clock ms at broadcast so a browser on the same machine can
-                // measure pose age against Date.now() (same metric as the native pipeline).
                 let p = &sample.pose;
-                let q = &p.quaternion;
-                let wall_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs_f64() * 1e3)
-                    .unwrap_or(0.0);
-                let json = format!(
-                    "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"q\":[{:.5},{:.5},{:.5},{:.5}],\"c\":{:.2},\"tw\":{:.3},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{:.6},\"tu\":{}}}",
-                    p.translation[0],
-                    p.translation[1],
-                    p.translation[2],
-                    q[0], q[1], q[2], q[3],
-                    p.confidence,
-                    wall_ms,
-                    p.euler_deg[0],
-                    p.euler_deg[1],
-                    p.euler_deg[2],
-                    p.host_timestamp_s,
-                    p.timestamp_us,
-                );
-
-                let msg = Message::Text(json);
-                let mut sent = 0u64;
-                let mut list = clients.lock().unwrap();
-                list.retain(|(ws_arc, full)| {
-                    if !(*full || tick) {
-                        return true;
-                    }
-                    let mut ws = ws_arc.lock().unwrap();
-                    if ws.send(msg.clone()).is_ok() {
-                        sent += 1;
-                        true
-                    } else {
-                        false
-                    }
-                });
-                drop(list);
-                ws_sent += sent;
+                let json = pose_json(p.translation, p.quaternion, p.confidence, p.host_timestamp_s, p.timestamp_us as i64);
+                ws_sent += send(&clients, json, tick);
             }
 
             // Report throughput every 5 seconds
@@ -416,6 +410,190 @@ fn slam_loop(clients: Clients, running: Arc<AtomicBool>) {
         }
 
         std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// One pose message. Raw XR50 convention (world and device in camera convention, meters,
+/// `[qx,qy,qz,qw]`); frame conversion is the client's job, Euler stays for the HUD/legacy
+/// readers. "tw" is wall-clock ms at broadcast so a client on the same machine can measure
+/// pose age against Date.now() (same metric as the native pipeline).
+fn pose_json(t: [f64; 3], q: [f64; 4], confidence: f64, host_s: f64, device_us: i64) -> String {
+    let wall_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1e3)
+        .unwrap_or(0.0);
+    let e = xvisio::protocol::quaternion_to_euler(q[3], q[0], q[1], q[2]);
+    format!(
+        "{{\"x\":{:.4},\"y\":{:.4},\"z\":{:.4},\"q\":[{:.5},{:.5},{:.5},{:.5}],\"c\":{:.2},\"tw\":{:.3},\"roll\":{:.1},\"pitch\":{:.1},\"yaw\":{:.1},\"t\":{:.6},\"tu\":{}}}",
+        t[0], t[1], t[2], q[0], q[1], q[2], q[3], confidence, wall_ms, e[0], e[1], e[2], host_s, device_us,
+    )
+}
+
+/// Sends `msg` (JSON text or binary) to full-rate clients, and to everyone when `tick` (the
+/// display-rate throttle) is due. Drops clients whose socket failed. Returns the number of sends.
+fn send(clients: &Clients, msg: impl Into<Message>, tick: bool) -> u64 {
+    let msg: Message = msg.into();
+    let mut sent = 0u64;
+    clients.lock().unwrap().retain(|(ws_arc, full)| {
+        if !(*full || tick) {
+            return true;
+        }
+        let ok = ws_arc.lock().unwrap().send(msg.clone()).is_ok();
+        sent += ok as u64;
+        ok
+    });
+    sent
+}
+
+/// The SDK helper's stdin (map commands go there) and its latest map event.
+static HELPER_STDIN: Mutex<Option<std::process::ChildStdin>> = Mutex::new(None);
+static MAP_STATUS: Mutex<String> = Mutex::new(String::new());
+
+/// The room map: saved on request, loaded automatically whenever the SDK source starts.
+fn map_path() -> PathBuf {
+    std::env::var("XR50_MAP").map(PathBuf::from).unwrap_or_else(|_| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../maps/room.xvmap")
+    })
+}
+
+/// `/map/save`, `/map/load`, `/map/status` (SDK source only). Save and load answer at once;
+/// the result arrives as a map event (`/map/status`, and broadcast to clients).
+fn map_action(action: &str) -> String {
+    let status = || MAP_STATUS.lock().unwrap().clone();
+    let path = map_path();
+    let command = match action {
+        "status" => {
+            let s = status();
+            return format!("{{\"ok\":true,\"saved\":{},\"last\":{}}}", path.exists(), if s.is_empty() { "null".into() } else { s });
+        }
+        "save" => {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            "save"
+        }
+        "load" => "load",
+        _ => return "{\"ok\":false,\"error\":\"unknown map action\"}".into(),
+    };
+    let mut stdin = HELPER_STDIN.lock().unwrap();
+    let Some(pipe) = stdin.as_mut() else {
+        return "{\"ok\":false,\"error\":\"maps need the SDK source (server --sdk)\"}".into();
+    };
+    match writeln!(pipe, "{command} {}", path.display()).and_then(|_| pipe.flush()) {
+        Ok(()) => format!("{{\"ok\":true,\"message\":\"{command} requested\"}}"),
+        Err(e) => format!("{{\"ok\":false,\"error\":\"{e}\"}}"),
+    }
+}
+
+/// Pose source: the official XVisio SDK through `xvsdk-bridge` (Windows), which runs SLAM on
+/// the host from the fisheye cameras + IMU and detects planes. The helper prints JSON lines;
+/// poses are converted to the raw XR50 convention and broadcast like edge poses, plane
+/// updates (`{"type":"planes",...}`, SDK world = raw XR50 world axes) go to every client.
+///
+/// Frame conversion, measured on the head on 2026-10-26 (level / tilted down / turned left,
+/// gravity from the IMU): the SDK world is gravity-aligned with Y down like the raw world
+/// (only the starting yaw differs), and the SDK reports the IMU frame, which is the XR50
+/// camera frame rotated 180° about Z. So q_raw = q_sdk · Rz(180°), translation unchanged.
+fn sdk_loop(clients: Clients, running: Arc<AtomicBool>) {
+    use std::io::BufRead;
+    let exe = std::env::var("XVSDK_BRIDGE").map(PathBuf::from).unwrap_or_else(|_| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tools/xvsdk/sdk/bin/xvsdk-bridge.exe")
+    });
+    // Rz(180°) on the right: q · [0,0,1,0]
+    let to_raw = |q: [f64; 4]| [q[1], -q[0], q[3], -q[2]];
+    let num = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
+
+    while running.load(Ordering::Relaxed) {
+        eprintln!("[XR50/SDK] starting {}", exe.display());
+        let child = std::process::Command::new(&exe)
+            .args(["--mode", "mixed", "--exit-on-stdin-eof", "--map"])
+            .arg(map_path())
+            .current_dir(exe.parent().unwrap_or(Path::new(".")))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn();
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[XR50/SDK] cannot start the helper: {e} (build it with xvsdk-bridge\\build.ps1)");
+                std::thread::sleep(Duration::from_secs(5));
+                continue;
+            }
+        };
+        let stdout = child.stdout.take().expect("piped stdout");
+        *HELPER_STDIN.lock().unwrap() = child.stdin.take();
+        let (mut count, mut ws_sent, mut planes) = (0u64, 0u64, 0usize);
+        let mut last_broadcast = std::time::Instant::now();
+        let mut last_report = std::time::Instant::now();
+        let mut last_planes = std::time::Instant::now() - Duration::from_secs(1);
+        let broadcast_interval = Duration::from_millis(8);
+
+        // The SDK also logs to stdout: only JSON lines are data.
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            if !running.load(Ordering::Relaxed) {
+                break;
+            }
+            if !line.starts_with('{') {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            if v.get("type").and_then(|t| t.as_str()) == Some("map") {
+                eprintln!("[XR50/SDK] map: {line}");
+                *MAP_STATUS.lock().unwrap() = line.clone();
+                ws_sent += send(&clients, line, true);
+                continue;
+            }
+            if v.get("type").and_then(|t| t.as_str()) == Some("planes") {
+                // The SDK refines planes ~50 times a second; clients need the latest set, not each step.
+                planes = v["planes"].as_array().map_or(0, |a| a.len());
+                if last_planes.elapsed() >= Duration::from_millis(200) {
+                    last_planes = std::time::Instant::now();
+                    ws_sent += send(&clients, line, true);
+                }
+                continue;
+            }
+            let Some(q) = v.get("q").and_then(|q| q.as_array()) else { continue };
+            let q: Vec<f64> = q.iter().filter_map(|x| x.as_f64()).collect();
+            if q.len() != 4 {
+                continue;
+            }
+            count += 1;
+            let now = std::time::Instant::now();
+            let tick = now.duration_since(last_broadcast) >= broadcast_interval;
+            let any_full = clients.lock().unwrap().iter().any(|(_, full)| *full);
+            if tick || any_full {
+                if tick {
+                    last_broadcast = now;
+                }
+                let json = pose_json(
+                    [num(&v, "x"), num(&v, "y"), num(&v, "z")],
+                    to_raw([q[0], q[1], q[2], q[3]]),
+                    num(&v, "c"),
+                    num(&v, "t"),
+                    num(&v, "tu") as i64,
+                );
+                ws_sent += send(&clients, json, tick);
+            }
+            if now.duration_since(last_report) >= Duration::from_secs(5) {
+                let elapsed = last_report.elapsed().as_secs_f64();
+                eprintln!(
+                    "[XR50/SDK] {} poses/s, {} client-msg/s, {} plane(s), {} client(s)",
+                    (count as f64 / elapsed) as u32,
+                    (ws_sent as f64 / elapsed) as u32,
+                    planes,
+                    clients.lock().unwrap().len()
+                );
+                count = 0;
+                ws_sent = 0;
+                last_report = now;
+            }
+        }
+        HELPER_STDIN.lock().unwrap().take();
+        let _ = child.kill();
+        let _ = child.wait();
+        eprintln!("[XR50/SDK] helper exited - restarting in 2 s");
+        std::thread::sleep(Duration::from_secs(2));
     }
 }
 
@@ -479,4 +657,91 @@ fn find_dist_dir() -> PathBuf {
     eprintln!("[WARN] visual-test/dist/ not found. HTTP will return 404.");
     eprintln!("       Run from the xvisio-rs/ or vibestar/ directory.");
     PathBuf::from("../visual-test/dist")
+}
+
+/// Depth frames fused per second at most (the camera delivers ~45).
+#[cfg(feature = "camera")]
+const MAP_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Our own room map (recon source): fuses stereo depth at the edge-SLAM poses, then once a
+/// second sends the changed mesh blocks (binary) and the planes (`{"type":"planes",...}`, raw
+/// XR50 world like the SDK source). A newly connected client gets every block.
+#[cfg(feature = "camera")]
+fn start_mapping(clients: Clients, poses: xvisio::recon::PoseHistory, running: Arc<AtomicBool>) {
+    use xvisio::recon::{detect_planes, RoomMap, TsdfConfig, FRAME_DELAY};
+    use xvisio::stereo::{Calibration, StereoConfig, StereoMatcher};
+    let path = std::env::var("XR50_CALIBRATION").map(PathBuf::from).unwrap_or_else(|_| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../calibration/xr50-fisheye.json")
+    });
+    let calibration = match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| Calibration::from_json(&t)) {
+        Ok(c) => c,
+        Err(e) => {
+            return eprintln!("[MAP] no camera calibration at {} ({e}): run xvsdk-bridge --dump-calibration", path.display());
+        }
+    };
+    let matcher = StereoMatcher::new(&calibration, (640, 400), StereoConfig::default());
+    std::thread::Builder::new()
+        .name("xr50-map".into())
+        .spawn(move || {
+            // Mapping shares the laptop with the browser and the native app: half the cores and
+            // at most MAP_RATE depth frames a second (full speed starved the WebXR page).
+            let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(1));
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("map thread pool");
+            let mut map = RoomMap::new(TsdfConfig::default());
+            let (mut last_update, mut last_fused, mut known_clients) = (std::time::Instant::now(), std::time::Instant::now(), 0);
+            while running.load(Ordering::Relaxed) {
+                // The cameras start with SLAM; until then (and after a re-plug) keep retrying.
+                let mut camera = match xvisio::camera::StereoCamera::open() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
+                };
+                eprintln!("[MAP] cameras streaming, mapping");
+                while let Ok(f) = camera.frame() {
+                    if last_fused.elapsed() < MAP_INTERVAL {
+                        continue;
+                    }
+                    if let Some(pose) = poses.at(f.received - FRAME_DELAY).filter(|p| p.confidence >= 0.5) {
+                        last_fused = std::time::Instant::now();
+                        pool.install(|| map.integrate_stereo(&matcher, [&f.images[0], &f.images[1]], &pose));
+                    }
+                    if last_update.elapsed() < Duration::from_secs(1) {
+                        continue;
+                    }
+                    last_update = std::time::Instant::now();
+                    let changed = pool.install(|| map.remesh());
+                    let count = clients.lock().unwrap().len();
+                    let blocks = if count > known_clients { map.keys() } else { changed };
+                    known_clients = count;
+                    if !blocks.is_empty() {
+                        send(&clients, map.encode(&blocks), true);
+                    }
+                    send(&clients, planes_json(&detect_planes(&map.mesh(), Default::default())), true);
+                }
+                eprintln!("[MAP] camera stream ended; reopening");
+            }
+        })
+        .expect("map thread");
+}
+
+#[cfg(not(feature = "camera"))]
+fn start_mapping(_: Clients, _: xvisio::recon::PoseHistory, _: Arc<AtomicBool>) {
+    eprintln!("[MAP] the recon source needs the camera feature: cargo build --release --features camera --example server");
+}
+
+/// Planes in the SDK source's message format: id, unit normal, offset, border polygon.
+#[cfg(feature = "camera")]
+fn planes_json(planes: &[xvisio::recon::Plane]) -> String {
+    let v3 = |p: &[f32; 3]| format!("[{:.3},{:.3},{:.3}]", p[0], p[1], p[2]);
+    let items: Vec<String> = planes
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let border: Vec<String> = p.border.iter().map(v3).collect();
+            format!("{{\"id\":\"recon-{i}\",\"n\":{},\"d\":{:.3},\"p\":[{}]}}", v3(&p.normal), p.offset, border.join(","))
+        })
+        .collect();
+    format!("{{\"type\":\"planes\",\"planes\":[{}]}}", items.join(","))
 }

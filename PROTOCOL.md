@@ -151,6 +151,17 @@ Response: [0x01, 0xA2, 0x33, ...]
 **Note:** libxvisio uses `{0xa2, 0x33, 0x01, 0x00, 0x00}` (rotation NOT enabled via this flag),
 yet the stream still includes rotation data. The rotation field may always be present.
 
+#### Start/Stop IMU Stream
+
+Found in the official SDK's `xslam-hid-sdk.dll` (built as `02 BD DF 01`, length 4, right next
+to the edge-stream command) and verified on 2026-10-26: starts ~1 kHz IMU reports on endpoint
+0x83, interleaved with the SLAM packets. Write-only, like the edge stream.
+
+```
+Command:  [0x02, 0xBD, 0xDF, enable]      enable: 1 = start, 0 = stop
+Reports:  [0x01, 0xBD, 0xDF, ...] at ~995 Hz (see "IMU Packet Format")
+```
+
 ## Initialization Sequence
 
 The correct order to initialize the XR50 for Edge SLAM streaming:
@@ -242,11 +253,33 @@ Offset  Size   Type      Hypothesis             Evidence
 59-62   4      —         Padding                Always zero
 ```
 
-The accelerometer hypothesis is based on:
-- Scale factor 2^(-14) = 1/16384 corresponds to ±2g accelerometer at 16-bit resolution
-- Value 22176/16384 ≈ 1.35g on one axis (gravity + sensor bias) is plausible
-- Other axes near zero match a stationary device
-- Further validation requires testing with device motion
+The accelerometer hypothesis above is **superseded** (2026-10-26): the real IMU is a separate
+report stream (below). On firmware V1.04P31 bytes 39/41/43 of the SLAM packet carry a coarse
+accelerometer copy at 1/128 g (124, -4, -21 for a still device; the IMU report read 0.969,
+-0.036, -0.171 g at the same moment) and byte 37 reads 0.
+
+## IMU Packet Format
+
+Reports with header `01 BD DF`, started by the IMU stream command. Decoded against the
+official SDK (XVSDK 3.2.0) running on the same device: a passive HID reader recorded the raw
+reports while the SDK printed its IMU values, joined on the device timestamp.
+
+```
+Offset  Size   Type        Field
+------  ----   ----        -----
+0-2     3      bytes       Header: 0x01 0xBD 0xDF
+3-6     4      uint32 LE   Device timestamp (µs, same clock as the SLAM packets)
+7-14    8      —           Zero
+15-26   12     float32 x3  Accelerometer x, y, z (g)
+27-38   12     float32 x3  Gyroscope x, y, z (rad/s)
+39-50   12     float32 x3  Magnetometer x, y, z (likely µT; |m| ≈ 78 at the desk)
+51-54   4      float32     Constant 321.65 / 322.65 (likely temperature in K; unverified)
+55-62   8      —           Zero / flags
+```
+
+The SDK reports accelerometer `(sdk.x, sdk.y, sdk.z) ≈ (raw.y, raw.x, raw.z) × 9.81` for the
+same instant; `xvisio-rs` returns the raw IMU-frame axes in m/s² and rad/s
+(`xvisio::types::ImuData`, `SlamStream::try_recv_imu`).
 
 ### Timestamp
 
