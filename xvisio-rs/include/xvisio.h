@@ -28,6 +28,11 @@
 #define PREFIX_DEVICE_TO_HOST 1
 
 /**
+ * Voxels per block edge.
+ */
+#define BLOCK 8
+
+/**
  * Opaque device handle for C consumers.
  */
 typedef struct XvDevice XvDevice;
