@@ -1,0 +1,26 @@
+{
+  "schema": "vibestar.fit.v1",
+  "revision": 0,
+  "units": "mm",
+  "status": "Provisional choices authorized by user; tune after fit prints",
+  "reference": "NSNF_v01",
+  "reference_step_sha256": "003f03d542307b59f0cda3add5112c88f6bb9b16531c2f554d9d41d97df53150",
+  "wearer_ipd_mm": 64,
+  "ipd_application": "Wearer fit target only; does not translate, rotate or scale reference display or combiner mounts",
+  "fit_print": {
+    "material": "PETG",
+    "nozzle_mm": 0.4,
+    "layer_height_mm": 0.2,
+    "perimeters": 4,
+    "infill_percent": 35,
+    "process_status": "Starting slicer settings, not validated strength or dimensional compensation"
+  },
+  "temple": { "length": 145, "width": 12, "thickness": 6, "screw": 3.2, "channelWidth": 6, "channelDepth": 2 },
+  "hinge": {
+    "tab_thickness_mm": 3,
+    "axial_clearance_each_side_mm": 0.3,
+    "candidate_pivot": "M3 through screw, two washers and prevailing-torque nut; determine length from actual washer/nut stack",
+    "rotation_deg": [0, 90],
+    "status": "Joint coupon; no frame attachment or folding stop yet"
+  }
+}

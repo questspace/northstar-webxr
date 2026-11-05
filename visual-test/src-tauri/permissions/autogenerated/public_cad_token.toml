@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-public-cad-token"
+description = "Enables the public_cad_token command without any pre-configured scope."
+commands.allow = ["public_cad_token"]
+
+[[permission]]
+identifier = "deny-public-cad-token"
+description = "Denies the public_cad_token command without any pre-configured scope."
+commands.deny = ["public_cad_token"]

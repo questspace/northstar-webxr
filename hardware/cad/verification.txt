@@ -1,0 +1,44 @@
+2026-11-05 local verification
+
+PASS: isolated hardware TypeScript check (npm run hardware:check).
+PASS: production Vite build and Tauri macOS bundle (hardware:desktop:build).
+PASS: all three Rust model tests: energy conservation, invalid inputs, units.
+PASS: ClassCAD generated default 21 x 12 x 12.6 mm hinge from a loaded v2 recipe.
+PASS: hinge STL export enabled after generation and disabled after a dimension edit.
+PASS: joint generated in two separate engine documents and viewed at 90 degrees.
+PASS: horizontal overflow absent at viewport widths 390, 850 and 1440 px.
+PASS: nine STEP mesh instances exported with a source SHA-256 matching local STEP.
+PASS: default arm and fork STL topology and dimension checks in package_fitprints.py.
+PASS: empty STL rejected before a package could be created.
+PASS: native ClassCAD temple generation and native STL save tested earlier in this session.
+
+These are scoped engineering checks, not a full UI accessibility/design audit or
+a fabrication release. The latest bundle was rebuilt; its newly added measurement
+and joint UI paths were exercised in the browser, not repeated in the native app.
+Browser reports one multiple-Three-import warning and zero errors after clean load.
+Build reports a large JS chunk warning. Neither is hidden as a passed performance test.
+
+Outstanding product work: attach hinges to the carrier, add stops and comfortable
+temple/nose contacts, package electronics and cable strain relief, register complete
+assembly, select and bench-check portable power/compute and verify actual optical fit.
+No physical fit, strength, fatigue, thermal, power integrity or optical calibration
+test has been performed by this workflow. Joint ZIP is fit coupons only.
+
+Revision 1 support checkpoint, 2026-11-05:
+PASS: source STEP hash checked before generating the support assembly.
+PASS: nine reference instances plus six ClassCAD-generated support solids.
+PASS: all six regenerated STLs are single closed oriented meshes with positive volume.
+PASS: 20-entry ZIP has valid CRCs, six OFB/STEP/STL sets, matching recipes and instructions.
+PASS: inward-shaped temples terminate at +/-75 mm; saddle volumes reduced to about
+      14.6 cm3 each (geometric solid volume, not a measured printed mass).
+PASS: browser support generation, archive download, orbit/zoom and separation UI.
+PASS: 390, 850, 1440 px widths have no horizontal overflow after ResizeObserver settles.
+PASS: isolated TypeScript check, three Rust tests, updated Vite/Tauri macOS build.
+Screenshot: support-r1/assembly.png, captured from the real WebGPU viewport.
+Generated files: support-r1/print-and-cad.zip. Check with check_support_archive.py.
+The updated bundle build passed; this revision's support generation was exercised
+in the browser. Full UI audit and native support-export click-through remain open.
+
+The frame-to-hinge interface is now present as removable rail clamps. The remaining
+product work listed above still applies to stops, nose support, complete packaging,
+electronics and actual physical verification. This checkpoint is not final glasses.

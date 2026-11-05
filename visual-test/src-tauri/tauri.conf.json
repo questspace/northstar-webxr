@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vibestar Hardware",
+  "version": "0.1.0",
+  "identifier": "org.vibestar.hardware",
+  "build": {
+    "beforeDevCommand": "npm run hardware:dev",
+    "beforeBuildCommand": "npm run hardware:build",
+    "devUrl": "http://localhost:5174",
+    "frontendDist": "../dist-hardware"
+  },
+  "app": {
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": true, "targets": ["app"], "icon": ["icons/icon.png"] }
+}

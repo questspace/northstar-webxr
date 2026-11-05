@@ -65,3 +65,24 @@ calibration/
 visual-test/public/recon/
 visual-test/dist/recon/
 *.tsbuildinfo
+visual-test/public/hardware/
+
+# Local credentials and hardware build
+.env
+.env.local
+visual-test/dist-hardware/
+
+.playwright-cli/
+hardware/cad/local/
+hardware/reconstruction/local/
+visual-test/src-tauri/gen/
+!visual-test/src-tauri/Cargo.lock
+!visual-test/package-lock.json
+!hardware/model/Cargo.lock
+
+__pycache__/
+
+# Downloaded reference assets; prepare.py retrieves the pinned archive
+hardware/NSNF_v01/
+hardware/NSNF_v01.zip
+hardware/NorthStar-Next-XR50-IR170-Mount.stl

@@ -1,0 +1,53 @@
+VIBESTAR SUPPORT ASSEMBLY — FIT PROTOTYPE, REVISION 1
+
+This set adds six removable parts to the candidate NSNF_v01 carrier. It is
+not the finished glasses enclosure. Reuse the existing optical carrier;
+do not remove or relocate optics to install this fit trial.
+
+Files use millimetres and assembly coordinates. In the slicer, separate
+parts and place each on the bed; do not scale. The rear temples bend inward
+to 150 mm centre-to-centre ear spacing. This is an assumed starting fit.
+The candidate front remains about 234 mm wide.
+
+Print assumptions: PETG, 0.4 mm nozzle, 0.2 mm layers, four perimeters,
+35% infill. Print a rail saddle/cap and one hinge pair before a full set.
+Lay the temple's broad surface on the bed; the ear drop requires an
+orientation/support choice. Keep support scars out of bearing surfaces.
+The fork has horizontal shelves: inspect support removal and layer bonding.
+No slicer profile or structural test has validated these assumptions.
+
+Hardware starting set:
+- Eight M3 x 40 mm through bolts, sixteen M3 washers, eight M3 nuts for
+  the rail clamps. Confirm grip length and thread projection on the print.
+- Two M3 x 20 mm hinge bolts, four washers, two M3 locknuts. Confirm
+  washer stack and usable thread length before tightening.
+- Approximately 0.5 mm compliant shim under each retained rail. The slot
+  is 8.2 mm wide; the candidate rail is 7.55 mm wide and 26.9 mm tall.
+- Optional soft rear retention strap and soft temple contact sleeves.
+  Sleeve dimensions depend on the actual wearer and material.
+
+Slide each saddle around its corresponding existing rail, place the shim
+under the rail and fit the cap. Tighten evenly only enough to prevent slip.
+A cap bottoming on the saddle without gripping the rail means the shim
+stack needs adjustment. Do not bend or crush the retained rail.
+
+Fit the 6 mm temple tab between the fork leaves. Nominal axial clearance
+is 0.3 mm per side. The 3.2 mm pivot bore is a clearance hole, not a thread.
+Use a locknut to retain adjustment; do not clamp the printed fork closed.
+Support the frame independently during the first fit trial. Hinges do not
+yet have mechanical opening stops; temple friction alone is not retention.
+
+The 6 mm wide, 2 mm deep open channel is for routing trials. It does not
+establish that the retained USB/video bundle fits. Keep a service loop
+outside the pivot and secure the cable without loading its connectors.
+A permanent harness needs strain relief and folding/pull testing.
+
+Validation performed: six single connected closed oriented STL meshes;
+ClassCAD OFB, STEP and STL exports; assembly displayed with nine reference
+instances. No collision sweep, minimum-wall, fatigue, drop, optical,
+electrical, thermal or on-head validation has been completed.
+
+Still required for complete glasses: nose contact/support, opening stops,
+front electronics housing, registered sensor mount and optical surfaces,
+validated harness and portable power/compute enclosure. Keep the original
+calibrated optical structure until those interfaces are established.

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Save CAD exports to a file selected in the native dialog.",
+  "windows": ["main"],
+  "permissions": ["core:default", "allow-public-cad-token", "dialog:allow-save", "fs:allow-write-file"]
+}

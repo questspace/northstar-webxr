@@ -1,0 +1,34 @@
+VIBESTAR REVISION 0: JOINT FIT COUPONS
+
+These two parts test a folding joint. They do not attach to the optical frame
+and do not establish wearable fit or load capacity. STL coordinates are mm.
+The package manifest records the exact STL hashes and assumptions.
+
+Starting process: PETG, 0.4 mm nozzle, 0.2 mm layers, four perimeters, 35%
+infill. Set temperatures and cooling from your filament manufacturer's
+profile. Do not scale the parts in the slicer to compensate for a tight bore.
+
+Arm: place its broad, unchannelled face on the bed, cable channel upward.
+Fork: use the flat backing face as the bed face; inspect layer preview for
+the curved tab overhangs and add removable support if your printer needs it.
+Use the slicer's lay-on-face tool, not the original CAD orientation.
+
+After cooling, remove supports and burrs. Measure the bore, arm thickness
+and tab gap. Nominal values: 3.2 mm bore, 6.0 mm arm, 6.6 mm gap.
+Record measurements before changing the recipe. The 0.3 mm gap per side
+is a starting clearance, not a guarantee of fit on your printer.
+
+Align the two pivot bores with the arm between the tabs. Trial-assemble
+with an M3 through screw, washers and a prevailing-torque nut. Select screw
+length from the actual 12.6 mm outer fork stack plus washers and nut
+engagement. Do not clamp the printed tabs inward until they bind the arm.
+Check smooth 0-90 degree rotation and inspect for cracking or delamination.
+Keep all ribbon and USB cables outside the joint during this test.
+
+Pass criteria for this coupon: inserts without forcing, turns through the
+full range, has no visible cracks, and the screw can be retained without
+binding. Record play and required torque. This is not a fatigue or strength
+qualification, and there is no mechanical open-position stop yet.
+
+Tune the CAD dimensions, regenerate, export and rerun package_fitprints.py.
+Keep reference optical mounting geometry unchanged during these tests.

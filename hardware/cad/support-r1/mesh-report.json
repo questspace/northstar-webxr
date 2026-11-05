@@ -1,0 +1,210 @@
+{
+  "status": "Fit prototype; not a fabrication release",
+  "source_sha256": "003f03d542307b59f0cda3add5112c88f6bb9b16531c2f554d9d41d97df53150",
+  "meshes": {
+    "left-rail-saddle": {
+      "file": "left-rail-saddle.stl",
+      "sha256": "1bf539b739cdcf82285a82a4c267dd208f7722746445fb4a4381436b5396dd33",
+      "units": "mm assumed; STL has no unit metadata",
+      "triangles": 2724,
+      "vertices": 1352,
+      "bounds_mm": [
+        [
+          -119.03697967529297,
+          83.0,
+          -30.0
+        ],
+        [
+          -78.03697967529297,
+          138.0,
+          1.4210854715202004e-14
+        ]
+      ],
+      "size_mm": [
+        41.0,
+        55.0,
+        30.000000000000014
+      ],
+      "signed_volume_mm3": 14641.949725546834,
+      "connected_components": 1,
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_edge_winding": 0,
+      "degenerate_triangles": 0,
+      "closed_single_oriented_mesh": true,
+      "limitations": [
+        "Self-intersection, minimum wall, fit, load and print process are not checked."
+      ]
+    },
+    "left-rail-cap": {
+      "file": "left-rail-cap.stl",
+      "sha256": "a5fd7f4656879d6c89bcf32dbf4cdd41b2f5fce98abe56bde53e51d62b42bb11",
+      "units": "mm assumed; STL has no unit metadata",
+      "triangles": 1052,
+      "vertices": 520,
+      "bounds_mm": [
+        [
+          -102.03697967529297,
+          83.0,
+          0.6000000238418579
+        ],
+        [
+          -78.03697967529297,
+          117.0,
+          3.5999999046325684
+        ]
+      ],
+      "size_mm": [
+        24.0,
+        34.0,
+        2.9999998807907104
+      ],
+      "signed_volume_mm3": 2351.6460851841543,
+      "connected_components": 1,
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_edge_winding": 0,
+      "degenerate_triangles": 0,
+      "closed_single_oriented_mesh": true,
+      "limitations": [
+        "Self-intersection, minimum wall, fit, load and print process are not checked."
+      ]
+    },
+    "left-rear-temple": {
+      "file": "left-rear-temple.stl",
+      "sha256": "a8f24c0ff3d064a87b43bd5ab6c4390232049d4837f9660ccdeab473c5910f06",
+      "units": "mm assumed; STL has no unit metadata",
+      "triangles": 932,
+      "vertices": 466,
+      "bounds_mm": [
+        [
+          -119.03697967529297,
+          126.0,
+          -24.0
+        ],
+        [
+          -69.0,
+          210.0,
+          -4.0
+        ]
+      ],
+      "size_mm": [
+        50.03697967529297,
+        84.0,
+        20.0
+      ],
+      "signed_volume_mm3": 7797.633926470613,
+      "connected_components": 1,
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_edge_winding": 0,
+      "degenerate_triangles": 0,
+      "closed_single_oriented_mesh": true,
+      "limitations": [
+        "Self-intersection, minimum wall, fit, load and print process are not checked."
+      ]
+    },
+    "right-rail-saddle": {
+      "file": "right-rail-saddle.stl",
+      "sha256": "49ff060dd8ea74b9ebc392660487e61fbc964cb4378f07cd8516daf63e399972",
+      "units": "mm assumed; STL has no unit metadata",
+      "triangles": 2740,
+      "vertices": 1360,
+      "bounds_mm": [
+        [
+          72.67498016357422,
+          83.0,
+          -30.0
+        ],
+        [
+          113.67498016357422,
+          138.0,
+          1.4210854715202004e-14
+        ]
+      ],
+      "size_mm": [
+        41.0,
+        55.0,
+        30.000000000000014
+      ],
+      "signed_volume_mm3": 14641.993935588704,
+      "connected_components": 1,
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_edge_winding": 0,
+      "degenerate_triangles": 0,
+      "closed_single_oriented_mesh": true,
+      "limitations": [
+        "Self-intersection, minimum wall, fit, load and print process are not checked."
+      ]
+    },
+    "right-rail-cap": {
+      "file": "right-rail-cap.stl",
+      "sha256": "c03a369b1fb8ab9be1a895ae0a92cfc58806d9e51ff512a60e518b2bc85400f2",
+      "units": "mm assumed; STL has no unit metadata",
+      "triangles": 1052,
+      "vertices": 520,
+      "bounds_mm": [
+        [
+          72.67498016357422,
+          83.0,
+          0.6000000238418579
+        ],
+        [
+          96.67498016357422,
+          117.0,
+          3.5999999046325684
+        ]
+      ],
+      "size_mm": [
+        24.0,
+        34.0,
+        2.9999998807907104
+      ],
+      "signed_volume_mm3": 2351.646085184152,
+      "connected_components": 1,
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_edge_winding": 0,
+      "degenerate_triangles": 0,
+      "closed_single_oriented_mesh": true,
+      "limitations": [
+        "Self-intersection, minimum wall, fit, load and print process are not checked."
+      ]
+    },
+    "right-rear-temple": {
+      "file": "right-rear-temple.stl",
+      "sha256": "cf62fe014e34793db70ac1c08bbcb492a613f94036cec3068f86345205a84b9e",
+      "units": "mm assumed; STL has no unit metadata",
+      "triangles": 950,
+      "vertices": 475,
+      "bounds_mm": [
+        [
+          69.0,
+          126.0,
+          -24.0
+        ],
+        [
+          113.67498016357422,
+          210.0,
+          -4.0
+        ]
+      ],
+      "size_mm": [
+        44.67498016357422,
+        84.0,
+        20.0
+      ],
+      "signed_volume_mm3": 7581.109816703098,
+      "connected_components": 1,
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_edge_winding": 0,
+      "degenerate_triangles": 0,
+      "closed_single_oriented_mesh": true,
+      "limitations": [
+        "Self-intersection, minimum wall, fit, load and print process are not checked."
+      ]
+    }
+  }
+}

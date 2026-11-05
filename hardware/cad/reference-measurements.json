@@ -1,0 +1,86 @@
+{
+  "date": "2026-11-04",
+  "step_identical_to_existing_reference": true,
+  "step_length_unit": "metre",
+  "stl_units": "STL has no unit declaration. Values plausibly represent millimetres; verify against the STEP geometry before dimensional use.",
+  "status": "Candidate reference variant, not verified against physical headset. Bounding boxes are axis-aligned envelopes, not mounting distances or optical transforms.",
+  "parts": [
+    {
+      "file": "hardware/NSNF_v01/NSNF_v01-cableclamp.stl",
+      "sha256": "6cec866536772b189db8537579b22656aba1be7f2f4efff0c361194e32c26bda",
+      "triangles": 1814,
+      "bounding_box_size_stl_units": [
+        21.6345,
+        19.7347,
+        7.0
+      ],
+      "identical_to_existing_reference": true
+    },
+    {
+      "file": "hardware/NSNF_v01/NSNF_v01-electronicsmount.stl",
+      "sha256": "09a7b0bff211d8a4aa1fbdc783a9a4c8c8830fbd20de3edf4355b0bbbcb9f2c4",
+      "triangles": 5314,
+      "bounding_box_size_stl_units": [
+        210.099,
+        38.9207,
+        8.0
+      ],
+      "identical_to_existing_reference": true
+    },
+    {
+      "file": "hardware/NSNF_v01/NSNF_v01-leftdisplaymount.stl",
+      "sha256": "85bf123ea8cc2be936bf1f5bd5728a31f34b7ab373a1a463fd29dd697638c59a",
+      "triangles": 1538,
+      "bounding_box_size_stl_units": [
+        60.2311,
+        28.1459,
+        17.9208
+      ],
+      "identical_to_existing_reference": true
+    },
+    {
+      "file": "hardware/NSNF_v01/NSNF_v01-leftslide.stl",
+      "sha256": "8bafd4db85490392a1433a626cb22a2310f960dcbc81b01d0aa7412f05d38b7e",
+      "triangles": 1110,
+      "bounding_box_size_stl_units": [
+        7.4768,
+        101.3,
+        26.9
+      ],
+      "identical_to_existing_reference": true
+    },
+    {
+      "file": "hardware/NSNF_v01/NSNF_v01-ribbonmanager.stl",
+      "sha256": "595ac12b1c1040ac7a39dbc71fd2a09201babc9d0ed0d849e0b1d0c5eef457a9",
+      "triangles": 320,
+      "bounding_box_size_stl_units": [
+        37.2202,
+        21.494,
+        5.0
+      ],
+      "identical_to_existing_reference": true
+    },
+    {
+      "file": "hardware/NSNF_v01/NSNF_v01_mainbracket.stl",
+      "sha256": "2d602eb6898dd5d25378104b5cecf30cd791935a66ae98d0b723201e24ad2a04",
+      "triangles": 14950,
+      "bounding_box_size_stl_units": [
+        233.9389,
+        59.0743,
+        85.4298
+      ],
+      "identical_to_existing_reference": true
+    },
+    {
+      "file": "hardware/NorthStar-Next-XR50-IR170-Mount.stl",
+      "sha256": "2fa140a07a4b1a02e8d588f4775688050766d6396ae273b45581f92de1292720",
+      "triangles": 15358,
+      "bounding_box_size_stl_units": [
+        105.0,
+        14.3777,
+        25.8762
+      ],
+      "identical_to_existing_reference": false
+    }
+  ]
+}
